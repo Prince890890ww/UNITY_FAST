@@ -1,0 +1,527 @@
+'use strict';
+const { getT } = require('../lang');
+const axios    = require('axios');
+const path     = require('path');
+const cfg      = require('../../config');
+const { sendButtons } = require('./helper');
+
+// ══════════════════════════════════════════════════════
+// UNITY DOWNLOADS EXTRA
+// Ported from Lara-3V (rebranded) plugins: dl-download, dl-fb, dl-url, dl-wallpaper
+// Adds: twitter, mediafire, instagram, facebook, gdrive, direct-url, apk, wallpaper
+// ══════════════════════════════════════════════════════
+
+module.exports = {
+  commands: [
+    // Twitter
+    'twitter', 'twdl', 'tweet',
+    // MediaFire
+    'mediafire', 'mfire',
+    // Instagram
+    'ig', 'instagram',
+    // Facebook
+    'facebook', 'fb',
+    // GDrive
+    'gdrive', 'gdrive2', 'googledrive',
+    // Direct URL
+    'downurl', 'down', 'dlurl',
+    // APK
+    'apk',
+    // Wallpaper
+    'rw', 'wallpaper', 'wall',
+  ],
+
+  async run({ sock, m }) {
+    const tr = await getT(m.sessionOwner);
+    const cmd  = m.command;
+    const chat = m.chat;
+    const msg  = m.msg;
+    const q    = m.text?.trim();
+
+    // ── TWITTER / TWDL / TWEET ────────────────────────
+    if (['twitter', 'twdl', 'tweet'].includes(cmd)) {
+      if (!q || !q.startsWith('https://')) {
+        return sendButtons(sock, chat, {
+          text: `🐦 *Twitter Video Downloader*\n\n*Usage:* .twdl <twitter link>\n\n*Example:* .twdl https://twitter.com/...\n\n${cfg.footer}`,
+          footer: cfg.footer,
+          buttons: [{ label: '📋 Menu', id: '.menu' }],
+          quoted: msg,
+        });
+      }
+      await m.react('⏳');
+      try {
+        const res  = await axios.get(`https://www.dark-yasiya-api.site/download/twitter?url=${encodeURIComponent(q)}`, { timeout: 30000 });
+        const data = res.data;
+
+        if (!data?.status || !data?.result) {
+          await m.react('❌');
+          return m.reply(`${tr('dl_twitter_fail')}\n\n${cfg.footer}`);
+        }
+
+        const { desc, thumb, video_sd, video_hd } = data.result;
+
+        await sock.sendMessage(chat, {
+          image: { url: thumb },
+          caption: `🐦 *Twitter Downloader*\n\n📝 *${desc || 'Twitter Video'}*\n\n*Reply with:*\n*1* — SD Video\n*2* — HD Video\n*3* — Audio (MP3)\n\n${cfg.footer}`,
+        }, { quoted: msg });
+
+        await m.react('✅');
+
+        // Listen for reply selection
+        const listener = sock.ev.on('messages.upsert', async (upsert) => {
+          const reply = upsert.messages[0];
+          if (!reply?.message) return;
+          const repText = reply.message?.conversation || reply.message?.extendedTextMessage?.text;
+          const replyJid = reply.key.remoteJid;
+          if (replyJid !== chat) return;
+          if (repText === '1') {
+            await sock.sendMessage(chat, { video: { url: video_sd }, caption: `*SD Video*\n\n${cfg.footer}` }, { quoted: reply });
+            sock.ev.off('messages.upsert', listener);
+          } else if (repText === '2') {
+            await sock.sendMessage(chat, { video: { url: video_hd }, caption: `*HD Video*\n\n${cfg.footer}` }, { quoted: reply });
+            sock.ev.off('messages.upsert', listener);
+          } else if (repText === '3') {
+            await sock.sendMessage(chat, { audio: { url: video_sd }, mimetype: 'audio/mpeg' }, { quoted: reply });
+            sock.ev.off('messages.upsert', listener);
+          }
+        });
+        setTimeout(() => sock.ev.off('messages.upsert', listener), 120000);
+      } catch (e) {
+        await m.react('❌');
+        return m.reply(`❌ Twitter download error: ${e.message}\n\n${cfg.footer}`);
+      }
+    }
+
+    // ── MEDIAFIRE ─────────────────────────────────────
+    if (['mediafire', 'mfire'].includes(cmd)) {
+      if (!q) {
+        return sendButtons(sock, chat, {
+          text: `📦 *MediaFire Downloader*\n\n*Usage:* .mediafire <link>\n\n*Example:* .mediafire https://www.mediafire.com/...\n\n${cfg.footer}`,
+          footer: cfg.footer,
+          buttons: [{ label: '📋 Menu', id: '.menu' }],
+          quoted: msg,
+        });
+      }
+      await m.react('⏳');
+      try {
+        const res  = await axios.get(`https://www.dark-yasiya-api.site/download/mfire?url=${encodeURIComponent(q)}`, { timeout: 30000 });
+        const data = res.data;
+
+        if (!data?.status || !data?.result?.download_url) {
+          await m.react('❌');
+          return m.reply(`${tr('dl_mediafire_fail')}\n\n${cfg.footer}`);
+        }
+
+        const { download_url, name, size, fileType } = data.result;
+
+        await m.react('⬆️');
+        await sock.sendMessage(chat, {
+          document: { url: download_url },
+          mimetype: fileType || 'application/octet-stream',
+          fileName: name || 'MediaFire_File',
+          caption: `📦 *MediaFire Download*\n\n📄 *File:* ${name || 'Unknown'}\n💾 *Size:* ${size || 'Unknown'}\n\n${cfg.footer}`,
+        }, { quoted: msg });
+        await m.react('✅');
+      } catch (e) {
+        await m.react('❌');
+        return m.reply(`❌ MediaFire error: ${e.message}\n\n${cfg.footer}`);
+      }
+    }
+
+    // ── INSTAGRAM ─────────────────────────────────────
+    if (['ig', 'instagram'].includes(cmd)) {
+      if (!q || !q.startsWith('https://')) {
+        return sendButtons(sock, chat, {
+          text: `📸 *Instagram Downloader*\n\n*Usage:* .ig <instagram link>\n\n*Example:* .ig https://www.instagram.com/p/...\n\n${cfg.footer}`,
+          footer: cfg.footer,
+          buttons: [{ label: '📋 Menu', id: '.menu' }],
+          quoted: msg,
+        });
+      }
+      await m.react('⏳');
+      try {
+        const res  = await axios.get(`https://www.dark-yasiya-api.site/download/instagram?url=${encodeURIComponent(q)}`, { timeout: 30000 });
+        const data = res.data;
+
+        if (!data?.status || !data?.result) {
+          await m.react('❌');
+          return m.reply(`${tr('dl_insta_fail')}\n\n${cfg.footer}`);
+        }
+
+        const media = Array.isArray(data.result) ? data.result : [data.result];
+        await m.react('⬆️');
+        for (const item of media.slice(0, 10)) {
+          const url = item?.url || item?.video || item?.image;
+          if (!url) continue;
+          const isVideo = item?.type === 'video' || url.includes('.mp4');
+          if (isVideo) {
+            await sock.sendMessage(chat, { video: { url }, caption: `📸 *Instagram*\n\n${cfg.footer}` }, { quoted: msg });
+          } else {
+            await sock.sendMessage(chat, { image: { url }, caption: `📸 *Instagram*\n\n${cfg.footer}` }, { quoted: msg });
+          }
+        }
+        await m.react('✅');
+      } catch (e) {
+        await m.react('❌');
+        return m.reply(`❌ Instagram error: ${e.message}\n\n${cfg.footer}`);
+      }
+    }
+
+    // ── FACEBOOK ──────────────────────────────────────
+    if (['facebook', 'fb'].includes(cmd)) {
+      if (!q || !q.startsWith('https://')) {
+        return sendButtons(sock, chat, {
+          text: `📘 *Facebook Video Downloader*\n\n*Usage:* .fb <facebook link>\n\n*Example:* .fb https://www.facebook.com/...\n\n${cfg.footer}`,
+          footer: cfg.footer,
+          buttons: [{ label: '📋 Menu', id: '.menu' }],
+          quoted: msg,
+        });
+      }
+      await m.react('⏳');
+
+      // ── Multi-API fallback (2026-04-14) ──────────────────
+      const FB_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36';
+      const fbApis = [
+        // 1. Cobalt FB — most reliable 2026 (moved to position 1)
+        async () => {
+          for (const inst of ['https://api.cobalt.tools', 'https://cobalt.oisd.nl', 'https://cobalt.catvibers.me']) {
+            try {
+              const r = await axios.post(`${inst}/`, { url: q, downloadMode: 'auto', videoQuality: '720' }, {
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000,
+              });
+              if (r?.data?.url) return { sd: r.data.url, hd: r.data.url, title: 'Facebook Video', thumbnail: null };
+            } catch {}
+          }
+          throw new Error('cobalt: all failed');
+        },
+        // 2. Dark Yasiya
+        async () => {
+          const r = await axios.get(`https://www.dark-yasiya-api.site/download/facebook?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          if (!r.data?.status || !r.data?.result) throw new Error('no result');
+          const { sd, hd, title, thumbnail } = r.data.result;
+          if (!sd && !hd) throw new Error('no video url');
+          return { sd: sd || hd, hd: hd || sd, title, thumbnail };
+        },
+        // 3. Siputzx FB
+        async () => {
+          const r = await axios.get(`https://api.siputzx.my.id/api/d/fb?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.data || r.data;
+          const sd = d?.sd || d?.download || d?.url;
+          const hd = d?.hd || sd;
+          if (!sd) throw new Error('no url');
+          return { sd, hd, title: d?.title || 'Facebook Video', thumbnail: d?.thumbnail || null };
+        },
+        // 4. Agatz FB
+        async () => {
+          const r = await axios.get(`https://api.agatz.xyz/api/facebook?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.data || r.data;
+          const sd = d?.sd || d?.url;
+          const hd = d?.hd || sd;
+          if (!sd) throw new Error('no url');
+          return { sd, hd, title: d?.title || 'Facebook Video', thumbnail: d?.thumbnail || null };
+        },
+        // 5. Paxsenix FB
+        async () => {
+          const r = await axios.get(`https://paxsenix.serv00.net/api/facebook?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.result || r.data;
+          const sd = d?.sd || d?.url || d?.download;
+          if (!sd) throw new Error('no url');
+          return { sd, hd: d?.hd || sd, title: d?.title || 'Facebook Video', thumbnail: d?.thumbnail || null };
+        },
+        // 6. Ndevapi FB
+        async () => {
+          const r = await axios.get(`https://ndevapi.com/download/facebook?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.data || r.data;
+          const sd = d?.sd || d?.url;
+          if (!sd) throw new Error('no url');
+          return { sd, hd: d?.hd || sd, title: d?.title || 'Facebook Video', thumbnail: d?.thumbnail || null };
+        },
+        // 7. Eliteprotech FB
+        async () => {
+          const r = await axios.get(`https://eliteprotech-apis.zone.id/fb?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.result || r.data;
+          const sd = d?.sd || d?.url || d?.downloadURL;
+          if (!sd) throw new Error('no url');
+          return { sd, hd: d?.hd || sd, title: d?.title || 'Facebook Video', thumbnail: d?.thumbnail || null };
+        },
+        // 8. XTeam FB
+        async () => {
+          const r = await axios.get(`https://api.xteam.xyz/facebook?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.result || r.data;
+          const sd = d?.sd || d?.url;
+          if (!sd) throw new Error('no url');
+          return { sd, hd: d?.hd || sd, title: d?.title || 'Facebook Video', thumbnail: d?.thumbnail || null };
+        },
+        // 9. Snapsave FB
+        async () => {
+          const r = await axios.post('https://snapsave.app/action.php', new URLSearchParams({ url: q }), {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: 'https://snapsave.app/', 'User-Agent': FB_UA },
+            timeout: 25000,
+          });
+          const html = r?.data || '';
+          const hdMatch = html.match(/href="(https:\/\/video[^"]+\.mp4[^"]*)"/);
+          const sdMatch = html.match(/href="(https:\/\/[^"]+\.mp4[^"]*)"/);
+          const url = hdMatch?.[1] || sdMatch?.[1];
+          if (!url) throw new Error('no url in html');
+          return { sd: url, hd: url, title: 'Facebook Video', thumbnail: null };
+        },
+        // 10. Fdown FB
+        async () => {
+          const r = await axios.post('https://fdown.net/download.php', new URLSearchParams({ URLz: q }), {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: 'https://fdown.net/', 'User-Agent': FB_UA },
+            timeout: 25000,
+          });
+          const html = r?.data || '';
+          const hdMatch = html.match(/id="hdlink"[^>]*href="([^"]+)"/);
+          const sdMatch = html.match(/id="sdlink"[^>]*href="([^"]+)"/);
+          const sd = sdMatch?.[1] || hdMatch?.[1];
+          const hd = hdMatch?.[1] || sd;
+          if (!sd) throw new Error('no url in fdown');
+          return { sd, hd, title: 'Facebook Video', thumbnail: null };
+        },
+        // 11. Getfvid FB
+        async () => {
+          const r = await axios.post('https://www.getfvid.com/downloader', new URLSearchParams({ url: q }), {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: 'https://www.getfvid.com/', 'User-Agent': FB_UA },
+            timeout: 25000,
+          });
+          const html = r?.data || '';
+          const m1 = html.match(/href="(https:\/\/[^"]*\.mp4[^"]*)"/);
+          if (m1?.[1]) return { sd: m1[1], hd: m1[1], title: 'Facebook Video', thumbnail: null };
+          throw new Error('no url');
+        },
+        // 12. Akuari FB
+        async () => {
+          const r = await axios.get(`https://api.akuari.my.id/downloader/facebook?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.result || r.data;
+          const sd = d?.sd || d?.url;
+          if (!sd) throw new Error('no url');
+          return { sd, hd: d?.hd || sd, title: d?.title || 'Facebook Video', thumbnail: d?.thumbnail || null };
+        },
+      ];
+
+      let fbData = null;
+      let usedApi = 'unknown';
+      for (let i = 0; i < fbApis.length; i++) {
+        try {
+          fbData = await fbApis[i]();
+          if (fbData?.sd || fbData?.hd) {
+            usedApi = ['DarkYasiya','Siputzx','Agatz','Paxsenix','Ndevapi','EliteProTech','XTeam','Cobalt','Snapsave','Fdown','Getfvid','Akuari'][i] || `API${i+1}`;
+            console.log(`[FB DL] ✅ ${usedApi}`);
+            break;
+          }
+        } catch (e) {
+          console.log(`[FB DL] ❌ API${i+1}: ${e.message?.substring(0, 60)}`);
+        }
+      }
+
+      if (!fbData?.sd && !fbData?.hd) {
+        await m.react('❌');
+        return m.reply(`❌ Facebook video download failed. Please check the link or try again later.\n\n${cfg.footer}`);
+      }
+
+      const { sd, hd, title, thumbnail } = fbData;
+
+      try {
+        if (thumbnail) {
+          await sock.sendMessage(chat, {
+            image: { url: thumbnail },
+            caption: `📘 *Facebook Downloader*\n\n📝 *${title || 'Facebook Video'}*\n✅ Found via ${usedApi}\n\n*Reply with:*\n*1.1* — SD Video\n*1.2* — HD Video\n*2.1* — Audio\n*2.2* — Document\n*2.3* — Voice\n\n${cfg.footer}`,
+          }, { quoted: msg });
+        } else {
+          throw new Error('no thumbnail');
+        }
+      } catch {
+        await sock.sendMessage(chat, {
+          text: `📘 *Facebook Downloader*\n\n📝 *${title || 'Facebook Video'}*\n✅ Found via ${usedApi}\n\n*Reply with:*\n*1.1* — SD Video\n*1.2* — HD Video\n*2.1* — Audio\n\n${cfg.footer}`,
+        }, { quoted: msg });
+      }
+      await m.react('✅');
+
+      const listener = sock.ev.on('messages.upsert', async (upsert) => {
+        const reply = upsert.messages[0];
+        if (!reply?.message) return;
+        const repText = reply.message?.conversation || reply.message?.extendedTextMessage?.text;
+        const replyJid = reply.key.remoteJid;
+        if (replyJid !== chat) return;
+        if (repText === '1.1') {
+          await sock.sendMessage(chat, { video: { url: sd }, caption: `*SD Video*\n\n${cfg.footer}` }, { quoted: reply });
+          sock.ev.off('messages.upsert', listener);
+        } else if (repText === '1.2') {
+          await sock.sendMessage(chat, { video: { url: hd || sd }, caption: `*HD Video*\n\n${cfg.footer}` }, { quoted: reply });
+          sock.ev.off('messages.upsert', listener);
+        } else if (repText === '2.1') {
+          await sock.sendMessage(chat, { audio: { url: sd }, mimetype: 'audio/mpeg' }, { quoted: reply });
+          sock.ev.off('messages.upsert', listener);
+        } else if (repText === '2.2') {
+          await sock.sendMessage(chat, { document: { url: sd }, mimetype: 'video/mp4', fileName: 'FB_Video.mp4', caption: cfg.footer }, { quoted: reply });
+          sock.ev.off('messages.upsert', listener);
+        } else if (repText === '2.3') {
+          await sock.sendMessage(chat, { audio: { url: sd }, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: reply });
+          sock.ev.off('messages.upsert', listener);
+        }
+      });
+      setTimeout(() => sock.ev.off('messages.upsert', listener), 120000);
+    }
+
+    // ── GDRIVE ────────────────────────────────────────
+    if (['gdrive', 'gdrive2', 'googledrive'].includes(cmd)) {
+      if (!q || !q.startsWith('https://')) {
+        return sendButtons(sock, chat, {
+          text: `📂 *Google Drive Downloader*\n\n*Usage:* .gdrive <drive link>\n\n*Example:* .gdrive https://drive.google.com/...\n\n${cfg.footer}`,
+          footer: cfg.footer,
+          buttons: [{ label: '📋 Menu', id: '.menu' }],
+          quoted: msg,
+        });
+      }
+      await m.react('⏳');
+      try {
+        const res  = await axios.get(`https://api.fgmods.xyz/api/downloader/gdrive?url=${encodeURIComponent(q)}&apikey=mnp3grlZ`, { timeout: 30000 });
+        const data = res.data;
+
+        if (!data?.result?.download) {
+          await m.react('❌');
+          return m.reply(`❌ Failed to get GDrive download link. Please check the link.\n\n${cfg.footer}`);
+        }
+
+        await m.react('⬆️');
+        await sock.sendMessage(chat, {
+          document: { url: data.result.download },
+          mimetype: data.result.mimeType || 'application/octet-stream',
+          fileName: data.result.name || 'GDrive_File',
+          caption: `📂 *Google Drive Download*\n\n📄 *${data.result.name || 'File'}*\n\n${cfg.footer}`,
+        }, { quoted: msg });
+        await m.react('✅');
+      } catch (e) {
+        await m.react('❌');
+        return m.reply(`❌ GDrive error: ${e.message}\n\n${cfg.footer}`);
+      }
+    }
+
+    // ── DIRECT URL DOWNLOAD ───────────────────────────
+    if (['downurl', 'down', 'dlurl'].includes(cmd)) {
+      if (!q) {
+        return sendButtons(sock, chat, {
+          text: `📁 *Direct URL Downloader*\n\n*Usage:* .down <direct link>\n\n*Example:* .down https://example.com/file.pdf\n\n${cfg.footer}`,
+          footer: cfg.footer,
+          buttons: [{ label: '📋 Menu', id: '.menu' }],
+          quoted: msg,
+        });
+      }
+
+      const urlMatch = /^(https?:\/\/[^\s]+)/i;
+      if (!urlMatch.test(q.trim())) {
+        return m.reply(`❌ Invalid URL. Please provide a valid https:// link.\n\n${cfg.footer}`);
+      }
+
+      await m.react('⬇️');
+      try {
+        const headRes    = await axios.head(q.trim(), { timeout: 15000 });
+        const headers    = headRes.headers;
+        const mimeType   = headers['content-type'] || 'application/octet-stream';
+        const dispHeader = headers['content-disposition'] || '';
+        let fileName = 'Downloaded_File';
+
+        if (dispHeader.includes('filename=')) {
+          fileName = dispHeader.split('filename=')[1].replaceAll('"', '').trim();
+        } else {
+          fileName = path.basename(new URL(q.trim()).pathname) || 'Downloaded_File';
+        }
+
+        await m.react('⬆️');
+        await sock.sendMessage(chat, {
+          document: { url: q.trim() },
+          mimetype: mimeType,
+          fileName,
+          caption: `📁 *File Downloaded*\n\n📄 ${fileName}\n\n${cfg.footer}`,
+        }, { quoted: msg });
+        await m.react('✅');
+      } catch (e) {
+        await m.react('❌');
+        return m.reply(`❌ Download failed!\n\n${e.message || e}\n\n${cfg.footer}`);
+      }
+    }
+
+    // ── APK DOWNLOADER ────────────────────────────────
+    if (cmd === 'apk') {
+      if (!q) {
+        return sendButtons(sock, chat, {
+          text: `📱 *APK Downloader*\n\n*Usage:* .apk <app name>\n\n*Example:* .apk WhatsApp\n\n${cfg.footer}`,
+          footer: cfg.footer,
+          buttons: [{ label: '📋 Menu', id: '.menu' }],
+          quoted: msg,
+        });
+      }
+      await m.react('⬇️');
+      try {
+        const apiUrl = `http://ws75.aptoide.com/api/7/apps/search/query=${encodeURIComponent(q)}/limit=1`;
+        const res    = await axios.get(apiUrl, { timeout: 30000 });
+        const data   = res.data;
+        const app    = data?.datalist?.list?.[0];
+
+        if (!app) {
+          await m.react('❌');
+          return m.reply(`❌ App not found on Aptoide.\n\n${cfg.footer}`);
+        }
+
+        const sizeMB    = (app.size / 1000000).toFixed(2);
+        const dlUrl     = app.file?.path_alt;
+        const caption   = `📱 *APK Downloader*\n\n🏷️ *Name:* ${app.name}\n💾 *Size:* ${sizeMB} MB\n📦 *Package:* ${app.package}\n📆 *Updated:* ${app.updated}\n👤 *Developer:* ${app.developer?.name}\n\n${cfg.footer}`;
+
+        await m.react('⬆️');
+        await sock.sendMessage(chat, {
+          document: { url: dlUrl },
+          fileName: app.name,
+          mimetype: 'application/vnd.android.package-archive',
+          caption,
+        }, { quoted: msg });
+        await m.react('✅');
+      } catch (e) {
+        await m.react('❌');
+        return m.reply(`❌ APK error: ${e.message}\n\n${cfg.footer}`);
+      }
+    }
+
+    // ── WALLPAPER ─────────────────────────────────────
+    if (['rw', 'wallpaper', 'wall'].includes(cmd)) {
+      if (!q) {
+        return sendButtons(sock, chat, {
+          text: `🖼️ *Wallpaper Download*\n\n*Usage:* .wallpaper <search term>\n\n*Example:* .wallpaper nature\n\n${cfg.footer}`,
+          footer: cfg.footer,
+          buttons: [{ label: '📋 Menu', id: '.menu' }],
+          quoted: msg,
+        });
+      }
+      await m.react('⏳');
+      try {
+        const res  = await axios.get(`https://api.unsplash.com/photos/random?query=${encodeURIComponent(q)}&client_id=WaOiSXvJ3mPFKHjSqCGMHD7bsGGJ9-Nmi5p8gqU3bpg`, { timeout: 20000 });
+        const data = res.data;
+        const url  = data?.urls?.full || data?.urls?.regular;
+
+        if (!url) {
+          await m.react('❌');
+          return m.reply(`❌ No wallpaper found for "${q}".\n\n${cfg.footer}`);
+        }
+
+        await sock.sendMessage(chat, {
+          image: { url },
+          caption: `🖼️ *Wallpaper* — ${q}\n\n${cfg.footer}`,
+        }, { quoted: msg });
+        await m.react('✅');
+      } catch {
+        // Fallback to Pexels-like free API
+        try {
+          const res  = await axios.get(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://source.unsplash.com/1920x1080/?${q}`)}`, { timeout: 20000 });
+          await sock.sendMessage(chat, {
+            image: { url: `https://source.unsplash.com/1920x1080/?${encodeURIComponent(q)}` },
+            caption: `🖼️ *Wallpaper* — ${q}\n\n${cfg.footer}`,
+          }, { quoted: msg });
+          await m.react('✅');
+        } catch (e2) {
+          await m.react('❌');
+          return m.reply(`❌ Wallpaper error: ${e2.message}\n\n${cfg.footer}`);
+        }
+      }
+    }
+  },
+};
