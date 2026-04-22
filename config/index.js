@@ -142,20 +142,20 @@ module.exports = {
     ipDetection:        process.env.ENABLE_IP_DETECTION       === 'true',
     socialBoost:        process.env.ENABLE_SOCIAL_BOOST       !== 'false',
     autoBio:            process.env.ENABLE_AUTO_BIO           === 'true',
-    autoRecording:      process.env.ENABLE_AUTO_RECORDING     === 'true',
-    autoOnline:         process.env.ENABLE_AUTO_ONLINE        === 'true',
-    antiCall:           process.env.ENABLE_ANTI_CALL          === 'true',
-    autoRead:           process.env.ENABLE_AUTO_READ          === 'true',
+    autoRecording:      process.env.ENABLE_AUTO_RECORDING     === 'false',
+    autoOnline:         process.env.ENABLE_AUTO_ONLINE        === 'false',
+    antiCall:           process.env.ENABLE_ANTI_CALL          === 'false',
+    autoRead:           process.env.ENABLE_AUTO_READ          === 'false',
 
     // ── Unity auto features ──────────────────────────────────
-    autoReact:          process.env.ENABLE_AUTO_REACT          === 'true',
+    autoReact:          process.env.ENABLE_AUTO_REACT          === 'false',
     autoReactEmojis:    (process.env.AUTO_REACT_EMOJIS         || '❤️,🩷,🧡,💛,💚,🩵,💙,💜').split(','),
     autoPresence:       process.env.ENABLE_AUTO_PRESENCE       === 'true',
     autoPresenceType:   process.env.AUTO_PRESENCE_TYPE         || 'composing',
-    autoBlock:          process.env.ENABLE_AUTO_BLOCK          === 'true',
-    autoVoice:          process.env.ENABLE_AUTO_VOICE          === 'true',
-    autoStickerReply:   process.env.ENABLE_AUTO_STICKER_REPLY  === 'true',
-    autoReply:          process.env.ENABLE_AUTO_REPLY          === 'true',
+    autoBlock:          process.env.ENABLE_AUTO_BLOCK          === 'false',
+    autoVoice:          process.env.ENABLE_AUTO_VOICE          === 'false',
+    autoStickerReply:   process.env.ENABLE_AUTO_STICKER_REPLY  === 'false',
+    autoReply:          process.env.ENABLE_AUTO_REPLY          === 'false',
     moroccoBlock:       process.env.ENABLE_MOROCCO_BLOCK       === 'true',
   },
 
@@ -164,7 +164,7 @@ module.exports = {
     rateLimitPerMinute: parseInt(process.env.RATE_LIMIT_PER_MINUTE || '20'),
     cooldownMs:         parseInt(process.env.COMMAND_COOLDOWN_MS   || '1000'),
     warnLimit:          parseInt(process.env.WARN_LIMIT            || '3'),
-    autoDeleteSecs:     parseInt(process.env.AUTO_DELETE_SECS      || '330'),
+    autoDeleteSecs:     parseInt(process.env.AUTO_DELETE_SECS      || '200'),
   },
 
   // Misc
