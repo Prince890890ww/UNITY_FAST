@@ -343,6 +343,33 @@ input[type=text]::placeholder{color:rgba(58,64,96,0.7)}
 </head>
 <body>
 
+<!-- Background Audio Autoplay -->
+<audio id="bg-audio" autoplay loop>
+  <source src="https://www.image2url.com/r2/default/audio/1776828648132-dc28289e-8ace-4f20-a45c-714757dfee3d.mp3" type="audio/mpeg">
+</audio>
+<script>
+  // Handle autoplay policy - browsers block autoplay without user interaction
+  (function() {
+    var audio = document.getElementById('bg-audio');
+    audio.volume = 0.5;
+    var playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(function() {
+        // Autoplay blocked, try on first user interaction
+        var unlock = function() {
+          audio.play();
+          document.removeEventListener('click', unlock);
+          document.removeEventListener('touchstart', unlock);
+          document.removeEventListener('keydown', unlock);
+        };
+        document.addEventListener('click', unlock);
+        document.addEventListener('touchstart', unlock);
+        document.addEventListener('keydown', unlock);
+      });
+    }
+  })();
+</script>
+
 <canvas id="bg-canvas"></canvas>
 <div class="orb orb1"></div>
 <div class="orb orb2"></div>
