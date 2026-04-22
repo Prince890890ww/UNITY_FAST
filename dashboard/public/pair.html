@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNITY-MD • Connect WhatsApp</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Orbitron:wght@400;700;900&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#03040a;
+  --card:rgba(8,12,20,0.9);
+  --border:rgba(37,211,102,0.12);
+  --accent:#25d366;
+  --accent2:#128c7e;
+  --accent3:#00d4ff;
+  --text:#e8edf5;
+  --sub:#3a4060;
+  --red:#ff3b5c;
+  --amber:#f59e0b;
+}
+
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Syne',sans-serif;
+  min-height:100vh;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  padding:24px;
+  overflow-x:hidden;
+}
+
+/* Canvas */
+#bg-canvas{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+/* Orbs */
+.orb{position:fixed;border-radius:50%;filter:blur(90px);pointer-events:none;z-index:0}
+.orb1{width:500px;height:500px;background:radial-gradient(circle,rgba(37,211,102,0.07),transparent 70%);top:-150px;left:-150px;animation:orbFloat1 9s ease-in-out infinite}
+.orb2{width:400px;height:400px;background:radial-gradient(circle,rgba(18,140,126,0.06),transparent 70%);bottom:-100px;right:-100px;animation:orbFloat2 7s ease-in-out infinite}
+.orb3{width:300px;height:300px;background:radial-gradient(circle,rgba(0,212,255,0.04),transparent 70%);top:40%;right:10%;animation:orbFloat1 11s ease-in-out infinite}
+@keyframes orbFloat1{0%,100%{transform:translate(0,0)}50%{transform:translate(25px,-25px)}}
+@keyframes orbFloat2{0%,100%{transform:translate(0,0)}50%{transform:translate(-20px,20px)}}
+
+.grid-overlay{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(37,211,102,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(37,211,102,0.02) 1px,transparent 1px);
+  background-size:56px 56px;
+  mask-image:radial-gradient(ellipse 80% 80% at 50% 50%,black 20%,transparent 100%);
+}
+
+/* Content */
+.content{position:relative;z-index:1;width:100%;max-width:480px;animation:pageIn .8s cubic-bezier(.22,1,.36,1) both}
+@keyframes pageIn{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
+
+/* Logo */
+.logo-wrap{text-align:center;margin-bottom:32px}
+.logo-icon{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:72px;height:72px;border-radius:20px;
+  background:linear-gradient(135deg,rgba(37,211,102,0.12),rgba(18,140,126,0.08));
+  border:1px solid rgba(37,211,102,0.2);
+  font-size:2.2rem;margin-bottom:14px;
+  box-shadow:0 0 35px rgba(37,211,102,0.12),inset 0 0 20px rgba(37,211,102,0.05);
+  animation:iconGlow 3s ease-in-out infinite;
+}
+@keyframes iconGlow{
+  0%,100%{box-shadow:0 0 35px rgba(37,211,102,0.12),inset 0 0 20px rgba(37,211,102,0.05)}
+  50%{box-shadow:0 0 55px rgba(37,211,102,0.22),inset 0 0 30px rgba(37,211,102,0.1)}
+}
+.logo-title{
+  font-family:'Orbitron',monospace;font-size:1.6rem;font-weight:900;letter-spacing:3px;
+  background:linear-gradient(135deg,var(--accent),#00ff88,var(--accent2));
+  background-size:200% 100%;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:shimmer 4s linear infinite;
+}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.logo-sub{color:var(--sub);font-size:0.62rem;letter-spacing:4px;text-transform:uppercase;margin-top:6px;font-family:'JetBrains Mono',monospace}
+
+/* Stats */
+.stats-bar{display:flex;gap:10px;justify-content:center;margin-bottom:24px;flex-wrap:wrap}
+.stat-box{
+  background:rgba(37,211,102,0.04);
+  border:1px solid rgba(37,211,102,0.1);
+  border-radius:14px;padding:14px 24px;text-align:center;min-width:100px;
+  backdrop-filter:blur(10px);
+  transition:all .3s;animation:pageIn .8s cubic-bezier(.22,1,.36,1) both;
+}
+.stat-box:nth-child(1){animation-delay:.1s}
+.stat-box:nth-child(2){animation-delay:.2s}
+.stat-box:nth-child(3){animation-delay:.3s}
+.stat-box:hover{border-color:rgba(37,211,102,0.25);background:rgba(37,211,102,0.07);transform:translateY(-2px)}
+.stat-val{font-size:1.6rem;font-weight:800;color:var(--accent);font-family:'JetBrains Mono',monospace;line-height:1}
+.stat-lbl{font-size:0.58rem;color:var(--sub);text-transform:uppercase;letter-spacing:3px;margin-top:5px;font-family:'JetBrains Mono',monospace}
+
+/* Card */
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:22px;padding:36px;
+  position:relative;overflow:hidden;
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  box-shadow:0 0 0 1px rgba(37,211,102,0.04),0 30px 70px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.03);
+  animation:pageIn .8s cubic-bezier(.22,1,.36,1) .15s both;
+}
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(37,211,102,0.7),rgba(0,212,255,0.3),transparent);
+}
+.card::after{
+  content:'';position:absolute;top:-1px;right:-1px;width:70px;height:70px;
+  background:linear-gradient(225deg,rgba(0,212,255,0.1),transparent);
+  border-radius:0 22px 0 0;pointer-events:none;
+}
+
+.card-title{font-size:1.2rem;font-weight:800;margin-bottom:6px;letter-spacing:-.2px}
+.card-sub{color:var(--sub);font-size:0.84rem;margin-bottom:26px;line-height:1.65}
+
+/* Input */
+.input-row{display:flex;gap:10px;margin-bottom:14px}
+input[type=text]{
+  flex:1;
+  background:rgba(37,211,102,0.03);
+  border:1.5px solid rgba(37,211,102,0.1);
+  border-radius:13px;padding:13px 16px;
+  color:var(--text);font-size:1rem;outline:none;
+  transition:all .25s;font-family:'Syne',sans-serif;
+}
+input[type=text]:focus{
+  border-color:rgba(37,211,102,0.4);
+  background:rgba(37,211,102,0.05);
+  box-shadow:0 0 0 4px rgba(37,211,102,0.06);
+}
+input[type=text]::placeholder{color:rgba(58,64,96,0.7)}
+
+/* Button */
+.btn{
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#fff;border:none;border-radius:13px;
+  padding:13px 24px;font-size:0.95rem;font-weight:700;
+  cursor:pointer;transition:all .25s cubic-bezier(.22,1,.36,1);
+  white-space:nowrap;font-family:'Syne',sans-serif;
+  box-shadow:0 4px 15px rgba(37,211,102,0.2);
+}
+.btn:hover{opacity:.9;transform:translateY(-2px);box-shadow:0 8px 25px rgba(37,211,102,0.3)}
+.btn:active{transform:scale(0.97)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+
+/* Code box */
+.code-box{
+  display:none;
+  background:rgba(37,211,102,0.03);
+  border:1px solid rgba(37,211,102,0.2);
+  border-radius:18px;padding:32px 24px;
+  text-align:center;margin-top:22px;
+}
+.code-box.show{display:block;animation:codeIn .5s cubic-bezier(.22,1,.36,1)}
+@keyframes codeIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
+.code-label{color:var(--sub);font-size:0.62rem;text-transform:uppercase;letter-spacing:4px;margin-bottom:16px;font-family:'JetBrains Mono',monospace}
+
+/* Code digits */
+.code-digits{display:flex;justify-content:center;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.digit-group{display:flex;gap:4px}
+.digit-sep{display:flex;align-items:center;padding:0 2px;color:rgba(37,211,102,0.3);font-size:1.5rem;font-family:'JetBrains Mono',monospace}
+.digit{
+  width:36px;height:48px;
+  background:rgba(37,211,102,0.06);
+  border:1px solid rgba(37,211,102,0.2);
+  border-radius:10px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:1.4rem;font-weight:900;color:var(--accent);
+  font-family:'JetBrains Mono',monospace;
+  animation:digitGlow 2s ease-in-out infinite;
+  box-shadow:0 0 10px rgba(37,211,102,0.05),inset 0 0 10px rgba(37,211,102,0.03);
+}
+.digit:nth-child(1){animation-delay:.0s}
+.digit:nth-child(2){animation-delay:.1s}
+.digit:nth-child(3){animation-delay:.2s}
+.digit:nth-child(4){animation-delay:.3s}
+@keyframes digitGlow{0%,100%{border-color:rgba(37,211,102,0.2);box-shadow:0 0 10px rgba(37,211,102,0.05)}50%{border-color:rgba(37,211,102,0.4);box-shadow:0 0 20px rgba(37,211,102,0.15)}}
+
+.code-timer{font-size:0.75rem;color:var(--sub);margin-bottom:12px;font-family:'JetBrains Mono',monospace}
+.copy-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  margin:10px auto 14px;padding:8px 22px;
+  background:rgba(37,211,102,0.08);
+  border:1px solid rgba(37,211,102,0.3);
+  border-radius:30px;color:var(--accent);
+  font-size:0.78rem;font-weight:700;cursor:pointer;
+  font-family:'JetBrains Mono',monospace;
+  transition:all .2s;
+}
+.copy-btn:hover{background:rgba(37,211,102,0.16);transform:translateY(-1px)}
+.copy-btn.copied{background:rgba(37,211,102,0.2);border-color:var(--accent)}
+.code-hint{color:var(--sub);font-size:0.83rem;line-height:1.75}
+.code-hint strong{color:var(--text)}
+
+/* Badge */
+.sbadge{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:7px 16px;border-radius:30px;
+  font-size:0.78rem;font-weight:600;margin-top:16px;
+  font-family:'JetBrains Mono',monospace;
+}
+.sb-conn{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);color:var(--amber)}
+.sb-pair{background:rgba(37,211,102,.07);border:1px solid rgba(37,211,102,.2);color:var(--accent)}
+.sb-ok{background:rgba(37,211,102,.12);border:1px solid rgba(37,211,102,.3);color:var(--accent)}
+.sb-err{background:rgba(255,59,92,.08);border:1px solid rgba(255,59,92,.2);color:var(--red)}
+.sdot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}
+.sdot.pulse{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.7)}}
+
+/* Steps */
+.steps{margin-top:24px}
+.step{display:flex;gap:14px;margin-bottom:14px;align-items:flex-start;animation:pageIn .6s ease both}
+.step:nth-child(1){animation-delay:.3s}
+.step:nth-child(2){animation-delay:.4s}
+.step:nth-child(3){animation-delay:.5s}
+.step:nth-child(4){animation-delay:.6s}
+.step-n{
+  min-width:28px;height:28px;
+  background:rgba(37,211,102,0.08);border:1px solid rgba(37,211,102,0.2);
+  border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:0.72rem;font-weight:800;color:var(--accent);
+  flex-shrink:0;margin-top:1px;
+  font-family:'JetBrains Mono',monospace;
+}
+.step-t{font-size:0.85rem;color:var(--sub);line-height:1.65}
+.step-t strong{color:var(--text)}
+
+/* Success */
+.success-box{display:none;text-align:center;padding:20px 0}
+.success-box.show{display:block;animation:codeIn .5s cubic-bezier(.22,1,.36,1)}
+.success-icon{font-size:4rem;margin-bottom:16px;animation:bounce .6s cubic-bezier(.22,1,.36,1)}
+@keyframes bounce{from{transform:scale(0)}to{transform:scale(1)}}
+.success-title{font-size:1.4rem;font-weight:800;color:var(--accent);margin-bottom:6px}
+.success-num{color:var(--sub);font-size:0.9rem;margin-bottom:16px;font-family:'JetBrains Mono',monospace}
+.success-msg{color:var(--sub);font-size:.85rem;margin-bottom:20px}
+.btn-full{width:100%}
+
+/* Blocked */
+.blocked-msg{
+  display:none;
+  background:rgba(255,59,92,.04);border:1px solid rgba(255,59,92,.2);
+  border-radius:16px;padding:28px;text-align:center;margin-top:20px;
+}
+.blocked-msg.show{display:block;animation:codeIn .4s ease}
+.blocked-icon{font-size:3rem;margin-bottom:12px}
+.blocked-title{font-size:1.1rem;font-weight:700;color:var(--red);margin-bottom:8px}
+.blocked-text{font-size:0.84rem;color:var(--sub);line-height:1.7}
+
+/* Error */
+.err-msg{
+  display:none;
+  background:rgba(255,59,92,.06);border:1px solid rgba(255,59,92,.2);
+  border-radius:10px;padding:11px 15px;color:var(--red);font-size:0.84rem;margin-top:12px;
+}
+.err-msg.show{display:block;animation:fadeUp .3s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+
+/* Footer */
+.footer{
+  margin-top:24px;color:rgba(58,64,96,0.5);font-size:0.68rem;
+  text-align:center;position:relative;z-index:1;letter-spacing:2px;
+  font-family:'JetBrains Mono',monospace;
+}
+.footer a{color:var(--accent);text-decoration:none}
+
+/* Scan line */
+.scan-line{
+  position:fixed;top:0;left:0;width:100%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(37,211,102,0.25),transparent);
+  animation:scanDown 7s linear infinite;z-index:0;pointer-events:none;
+}
+@keyframes scanDown{0%{top:-1px}100%{top:100vh}}
+
+/* Settings modal pieces */
+.mode-btn{
+  background:rgba(37,211,102,0.04);
+  border:1.5px solid rgba(37,211,102,0.12);
+  border-radius:10px;padding:9px 18px;
+  color:var(--sub);font-family:'Syne',sans-serif;font-size:0.82rem;font-weight:600;
+  cursor:pointer;transition:all .2s;
+}
+.mode-btn:hover{border-color:rgba(37,211,102,0.3);color:var(--text)}
+.mode-btn.active{background:rgba(37,211,102,0.12);border-color:rgba(37,211,102,0.5);color:var(--accent)}
+
+.feat-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid rgba(37,211,102,0.05);
+}
+.feat-row:last-child{border-bottom:none;padding-bottom:0}
+.feat-lbl{font-size:0.84rem;color:var(--text)}
+.feat-desc{font-size:0.72rem;color:var(--sub);margin-top:2px}
+
+/* Toggle switch */
+.tog{position:relative;width:44px;height:24px;flex-shrink:0}
+.tog input{opacity:0;width:0;height:0}
+.tog-sl{
+  position:absolute;inset:0;border-radius:24px;cursor:pointer;
+  background:rgba(37,211,102,0.08);border:1.5px solid rgba(37,211,102,0.15);
+  transition:all .25s;
+}
+.tog input:checked+.tog-sl{background:rgba(37,211,102,0.25);border-color:rgba(37,211,102,0.5)}
+.tog-sl::after{
+  content:'';position:absolute;top:3px;left:3px;
+  width:14px;height:14px;border-radius:50%;
+  background:var(--sub);transition:all .25s;
+}
+.tog input:checked+.tog-sl::after{transform:translateX(20px);background:var(--accent)}
+
+.cmd-group-card{
+  background:rgba(8,12,20,0.9);border:1px solid var(--border);
+  border-radius:16px;margin-bottom:10px;overflow:hidden;
+}
+.cmd-group-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px;cursor:pointer;
+  transition:background .2s;
+}
+.cmd-group-hdr:hover{background:rgba(37,211,102,0.03)}
+.cmd-group-hdr-title{font-size:0.85rem;font-weight:700;color:var(--text)}
+.cmd-group-hdr-meta{font-size:0.72rem;color:var(--sub);font-family:'JetBrains Mono',monospace}
+.cmd-group-body{display:none;padding:0 18px 14px;border-top:1px solid rgba(37,211,102,0.06)}
+.cmd-group-body.open{display:block}
+.cmd-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 0;border-bottom:1px solid rgba(37,211,102,0.04);
+}
+.cmd-row:last-child{border-bottom:none}
+.cmd-name{font-size:0.8rem;color:var(--text);font-family:'JetBrains Mono',monospace}
+.cat-tog-row{display:flex;gap:8px}
+.cat-tog-btn{
+  font-size:0.66rem;padding:4px 10px;border-radius:20px;cursor:pointer;
+  font-family:'JetBrains Mono',monospace;font-weight:700;border:1px solid;transition:all .15s;
+}
+.cat-on{background:rgba(37,211,102,0.08);border-color:rgba(37,211,102,0.25);color:var(--accent)}
+.cat-on:hover{background:rgba(37,211,102,0.2)}
+.cat-off{background:rgba(255,59,92,0.06);border-color:rgba(255,59,92,0.2);color:var(--red)}
+.cat-off:hover{background:rgba(255,59,92,0.15)}
+</style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+<div class="orb orb3"></div>
+<div class="grid-overlay"></div>
+<div class="scan-line"></div>
+
+<div class="content">
+
+  <div class="logo-wrap">
+    <div class="logo-icon">🧲</div>
+    <div class="logo-title">UNITY-MD</div>
+    <div class="logo-sub">® Unity Team • WhatsApp Bot Platform</div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat-box"><div class="stat-val" id="cnt-on">—</div><div class="stat-lbl">Online</div></div>
+    <div class="stat-box"><div class="stat-val" id="cnt-usr">—</div><div class="stat-lbl">Users</div></div>
+    <div class="stat-box"><div class="stat-val" id="cnt-grp">—</div><div class="stat-lbl">Groups</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">🔗 Connect Your WhatsApp</div>
+    <div class="card-sub">Enter your number with country code to get a pairing code. No QR scan needed!</div>
+
+    <div id="form-wrap">
+      <div class="input-row">
+        <input type="text" id="numIn" placeholder="94771234567" maxlength="15" inputmode="numeric">
+        <button class="btn" id="pairBtn" onclick="startPair()">Get Code</button>
+      </div>
+      <div class="err-msg" id="err-msg"></div>
+    </div>
+
+    <div class="blocked-msg" id="blk-msg">
+      <div class="blocked-icon">🔒</div>
+      <div class="blocked-title">Number Blocked</div>
+      <div class="blocked-text">This number has been blocked by the admin.<br>Please contact support to unblock your number.</div>
+    </div>
+
+    <div class="code-box" id="code-box">
+      <div class="code-label">Your Pairing Code</div>
+      <div class="code-digits" id="code-digits">
+        <div class="digit-group" id="dg1">
+          <div class="digit" id="d0">-</div>
+          <div class="digit" id="d1">-</div>
+          <div class="digit" id="d2">-</div>
+          <div class="digit" id="d3">-</div>
+        </div>
+        <div class="digit-sep">–</div>
+        <div class="digit-group" id="dg2">
+          <div class="digit" id="d4">-</div>
+          <div class="digit" id="d5">-</div>
+          <div class="digit" id="d6">-</div>
+          <div class="digit" id="d7">-</div>
+        </div>
+      </div>
+      <div class="code-timer" id="code-timer"></div>
+      <button class="copy-btn" id="copy-btn" onclick="copyCode()">📋 Copy Code</button>
+      <div class="code-hint">
+        Open WhatsApp → <strong>Settings → Linked Devices</strong><br>
+        → <strong>Link a Device</strong> → Enter this code ✅
+      </div>
+      <div>
+        <span class="sbadge sb-pair" id="status-badge">
+          <span class="sdot pulse"></span>
+          <span id="status-txt">Waiting for scan...</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="success-box" id="success-box">
+      <div class="success-icon">🎉</div>
+      <div class="success-title">Bot is Active!</div>
+      <div class="success-num" id="success-num"></div>
+      <div class="success-msg">Send <strong style="color:var(--accent)">.menu</strong> on WhatsApp to get started.</div>
+      <button class="btn btn-full" onclick="openSettings()" style="margin-bottom:10px">⚙️ Configure Bot Settings</button>
+      <button class="btn btn-full" style="background:rgba(37,211,102,0.08);border:1px solid rgba(37,211,102,0.2);color:var(--accent);box-shadow:none" onclick="resetForm()">Connect Another Number</button>
+    </div>
+
+    <div class="steps" id="steps">
+      <div class="step"><div class="step-n">1</div><div class="step-t"><strong>Enter your number</strong> with country code (e.g. 94771234567)</div></div>
+      <div class="step"><div class="step-n">2</div><div class="step-t"><strong>Click Get Code</strong> and wait a few seconds</div></div>
+      <div class="step"><div class="step-n">3</div><div class="step-t">Go to WhatsApp → <strong>Settings → Linked Devices → Link a Device</strong></div></div>
+      <div class="step"><div class="step-n">4</div><div class="step-t"><strong>Enter the 8-digit code</strong> — your bot activates instantly ⚡</div></div>
+    </div>
+  </div>
+
+  <div class="footer">Powered by <a href="#">UNITY-MD</a> &nbsp;|&nbsp; 99,999+ bots supported</div>
+
+</div><!-- end content -->
+
+<!-- ══════════════ SETTINGS MODAL ══════════════ -->
+<div id="settings-overlay" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(3,4,10,0.92);backdrop-filter:blur(16px);overflow-y:auto;padding:24px 16px">
+  <div style="max-width:560px;margin:0 auto">
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px">
+      <div>
+        <div style="font-family:'Orbitron',monospace;font-size:1.1rem;font-weight:900;letter-spacing:2px;color:var(--accent)">⚙️ BOT SETTINGS</div>
+        <div id="cfg-num" style="font-size:0.72rem;color:var(--sub);font-family:'JetBrains Mono',monospace;margin-top:3px"></div>
+      </div>
+      <button onclick="closeSettings()" style="background:rgba(255,59,92,0.08);border:1px solid rgba(255,59,92,0.2);color:var(--red);border-radius:10px;padding:8px 16px;cursor:pointer;font-family:'Syne',sans-serif;font-weight:700;font-size:0.85rem">✕ Close</button>
+    </div>
+
+    <!-- Save bar -->
+    <div id="save-bar" style="display:none;position:sticky;top:0;z-index:10;background:rgba(37,211,102,0.06);border:1px solid rgba(37,211,102,0.25);border-radius:14px;padding:12px 18px;margin-bottom:18px;display:none;align-items:center;justify-content:space-between;gap:12px">
+      <span style="font-size:0.82rem;color:var(--accent)">⚠️ Unsaved changes — bot will restart after save</span>
+      <button id="save-btn" onclick="saveSettings()" style="background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:10px;padding:9px 22px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif;font-size:0.85rem;white-space:nowrap">💾 Save & Restart</button>
+    </div>
+
+    <div id="cfg-loading" style="text-align:center;padding:60px;color:var(--sub);font-family:'JetBrains Mono',monospace;font-size:0.85rem">Loading settings...</div>
+
+    <div id="cfg-body" style="display:none">
+
+      <!-- Mode -->
+      <div style="background:rgba(8,12,20,0.9);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:14px">
+        <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:3px;color:var(--sub);margin-bottom:14px;font-family:'JetBrains Mono',monospace">🤖 Bot Mode</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="mode-btn" data-mode="public"  onclick="setMode('public')"  >🌐 Public</button>
+          <button class="mode-btn" data-mode="group"   onclick="setMode('group')"   >👥 Group Only</button>
+          <button class="mode-btn" data-mode="inbox"   onclick="setMode('inbox')"   >📩 Inbox Only</button>
+          <button class="mode-btn" data-mode="private" onclick="setMode('private')" >🔒 Private</button>
+        </div>
+      </div>
+
+      <!-- Auto Features -->
+      <div style="background:rgba(8,12,20,0.9);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:14px">
+        <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:3px;color:var(--sub);margin-bottom:14px;font-family:'JetBrains Mono',monospace">⚡ Auto Features</div>
+        <div id="features-list"></div>
+      </div>
+
+      <!-- Command Groups -->
+      <div id="cmd-groups"></div>
+
+    </div><!-- cfg-body -->
+
+    <div id="cfg-error" style="display:none;text-align:center;padding:40px;color:var(--red);font-size:0.85rem"></div>
+
+  </div>
+</div><!-- end settings-overlay -->
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+let curNum = null, pollInt = null, timerInt = null;
+
+async function loadStats() {
+  try {
+    const r = await fetch('/api/pair/stats');
+    if (!r.ok) return;
+    const d = await r.json();
+    animCount('cnt-on', d.connected ?? 0);
+    animCount('cnt-usr', d.users ?? 0);
+    animCount('cnt-grp', d.groups ?? 0);
+  } catch {}
+}
+
+function animCount(id, target) {
+  const el = document.getElementById(id);
+  const start = parseInt(el.textContent) || 0;
+  const diff = target - start;
+  const steps = 20;
+  let i = 0;
+  const t = setInterval(() => {
+    i++;
+    el.textContent = Math.round(start + diff * (i / steps));
+    if (i >= steps) clearInterval(t);
+  }, 30);
+}
+
+loadStats();
+setInterval(loadStats, 15000);
+
+socket.on('session_update', ({userId, status, pairCode}) => {
+  if (userId !== curNum) return;
+  if (status === 'connected') showSuccess(userId);
+  else if (pairCode) showCode(pairCode);
+  updateBadge(status);
+});
+
+async function startPair() {
+  const num = document.getElementById('numIn').value.replace(/[^0-9]/g, '');
+  if (num.length < 7) { showErr('Enter a valid phone number with country code'); return; }
+  curNum = num; hideErr(); setBusy(true);
+  try {
+    const r = await fetch('/api/pair', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({number: num})
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      if (d.blocked) { showBlocked(); setBusy(false); return; }
+      showErr(d.error || 'Failed. Try again.');
+      setBusy(false); return;
+    }
+    if (d.status === 'already_connected') showSuccess(num);
+    else if (d.pairCode) { showCode(d.pairCode); startPoll(num); }
+    else showErr('Could not get pair code. Try again.');
+  } catch(e) { showErr('Network error. Try again.'); }
+  setBusy(false);
+}
+
+function startPoll(num) {
+  if (pollInt) clearInterval(pollInt);
+  pollInt = setInterval(async () => {
+    try {
+      const r = await fetch('/api/pair/status/' + num);
+      const d = await r.json();
+      if (d.status === 'connected') { clearInterval(pollInt); showSuccess(num); }
+      else if (d.pairCode && d.pairCode !== getCurrentCode()) showCode(d.pairCode);
+      updateBadge(d.status);
+    } catch {}
+  }, 3000);
+}
+
+function getCurrentCode() {
+  return ['d0','d1','d2','d3','d4','d5','d6','d7'].map(id => document.getElementById(id)?.textContent || '').join('');
+}
+
+function copyCode() {
+  const code = getCurrentCode().replace(/-/g,'');
+  if (!code || code.length < 8) return;
+  const formatted = code.slice(0,4) + '-' + code.slice(4);
+  navigator.clipboard.writeText(formatted).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = '✅ Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '📋 Copy Code'; btn.classList.remove('copied'); }, 2000);
+  }).catch(() => {
+    // fallback for older browsers
+    const ta = document.createElement('textarea');
+    ta.value = formatted;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = '✅ Copied!';
+    setTimeout(() => { btn.textContent = '📋 Copy Code'; }, 2000);
+  });
+}
+
+let codeExpiry = 0;
+function showCode(code) {
+  document.getElementById('code-box').classList.add('show');
+  document.getElementById('steps').style.display = 'none';
+  // Fill digit boxes
+  const chars = code.replace(/[^A-Z0-9]/gi, '').split('');
+  for (let i = 0; i < 8; i++) {
+    const el = document.getElementById('d' + i);
+    if (el) el.textContent = chars[i] || '-';
+  }
+  codeExpiry = Date.now() + 115000;
+  if (timerInt) clearInterval(timerInt);
+  timerInt = setInterval(() => {
+    const left = Math.max(0, Math.ceil((codeExpiry - Date.now()) / 1000));
+    document.getElementById('code-timer').textContent = left > 0
+      ? `⏱ Code expires in ${left}s`
+      : '⏰ Code expired — refreshing...';
+    if (left === 0) clearInterval(timerInt);
+  }, 1000);
+}
+
+function showSuccess(num) {
+  if (pollInt) clearInterval(pollInt);
+  if (timerInt) clearInterval(timerInt);
+  document.getElementById('code-box').classList.remove('show');
+  document.getElementById('form-wrap').style.display = 'none';
+  document.getElementById('steps').style.display = 'none';
+  document.getElementById('blk-msg').classList.remove('show');
+  document.getElementById('success-box').classList.add('show');
+  document.getElementById('success-num').textContent = '+' + num;
+  loadStats();
+}
+
+/* ═══════════════════════════════════════════════
+   SETTINGS PANEL
+═══════════════════════════════════════════════ */
+let cfgData = null;       // loaded settings
+let cfgChanges = {};      // pending changes: { commands:{}, features:{}, mode:null }
+let cfgNum = null;        // current number being configured
+
+function openSettings() {
+  cfgNum = curNum;
+  cfgChanges = { commands: {}, features: {}, mode: null };
+  document.getElementById('settings-overlay').style.display = 'block';
+  document.getElementById('cfg-num').textContent = '+' + cfgNum;
+  document.getElementById('cfg-loading').style.display = 'block';
+  document.getElementById('cfg-body').style.display = 'none';
+  document.getElementById('cfg-error').style.display = 'none';
+  document.getElementById('save-bar').style.display = 'none';
+  loadCfg();
+}
+
+function closeSettings() {
+  document.getElementById('settings-overlay').style.display = 'none';
+}
+
+async function loadCfg() {
+  try {
+    const r = await fetch('/api/pair/settings/' + cfgNum);
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Failed to load');
+    cfgData = d;
+    renderCfg();
+  } catch(e) {
+    document.getElementById('cfg-loading').style.display = 'none';
+    const er = document.getElementById('cfg-error');
+    er.textContent = '⚠️ ' + e.message;
+    er.style.display = 'block';
+  }
+}
+
+function markDirty() {
+  document.getElementById('save-bar').style.display = 'flex';
+}
+
+function setMode(m) {
+  cfgChanges.mode = m;
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === m);
+  });
+  markDirty();
+}
+
+function renderCfg() {
+  document.getElementById('cfg-loading').style.display = 'none';
+  document.getElementById('cfg-body').style.display = 'block';
+
+  // Mode buttons
+  const curMode = cfgData.mode || 'public';
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === curMode);
+  });
+
+  // Features
+  const FEAT_LABELS = {
+    autoRecording:   ['🎙 Auto Recording',   'Auto-record voice notes'],
+    autoOnline:      ['🟢 Always Online',     'Show online status always'],
+    autoStatusView:  ['👁 Auto Status View',  'Automatically view statuses'],
+    autoStatusReact: ['❤️ Auto Status React', 'React to statuses automatically'],
+    autoRead:        ['✅ Auto Read',          'Mark messages as read instantly'],
+    autoTyping:      ['⌨️ Auto Typing',        'Show typing indicator'],
+    autoBio:         ['📝 Auto Bio',           'Rotate bio automatically'],
+    didYouMean:      ['💡 Did You Mean',       'Suggest command corrections'],
+    antiCall:        ['🚫 Anti Call',          'Block incoming calls'],
+  };
+  const fl = document.getElementById('features-list');
+  fl.innerHTML = '';
+  const feats = cfgData.features || {};
+  for (const [key, [label, desc]] of Object.entries(FEAT_LABELS)) {
+    const checked = !!feats[key];
+    const id = 'feat-' + key;
+    const row = document.createElement('div');
+    row.className = 'feat-row';
+    row.innerHTML = `
+      <div>
+        <div class="feat-lbl">${label}</div>
+        <div class="feat-desc">${desc}</div>
+      </div>
+      <label class="tog">
+        <input type="checkbox" id="${id}" ${checked ? 'checked' : ''} onchange="onFeatChange('${key}',this.checked)">
+        <span class="tog-sl"></span>
+      </label>`;
+    fl.appendChild(row);
+  }
+
+  // Command groups
+  const cg = document.getElementById('cmd-groups');
+  cg.innerHTML = '';
+  for (const [cat, cmds] of Object.entries(cfgData.groups || {})) {
+    if (!cmds.length) continue;
+    const onCount = cmds.filter(c => c.enabled).length;
+    const card = document.createElement('div');
+    card.className = 'cmd-group-card';
+    const safecat = cat.replace(/[^a-zA-Z0-9]/g,'_');
+    card.innerHTML = `
+      <div class="cmd-group-hdr" onclick="toggleCat('${safecat}')">
+        <div>
+          <div class="cmd-group-hdr-title">${cat}</div>
+          <div class="cmd-group-hdr-meta">${onCount}/${cmds.length} enabled</div>
+        </div>
+        <div class="cat-tog-row">
+          <button class="cat-tog-btn cat-on" onclick="event.stopPropagation();catAll('${safecat}',true)">All On</button>
+          <button class="cat-tog-btn cat-off" onclick="event.stopPropagation();catAll('${safecat}',false)">All Off</button>
+          <span style="color:var(--sub);font-size:0.75rem;margin-left:4px" id="arr-${safecat}">▼</span>
+        </div>
+      </div>
+      <div class="cmd-group-body" id="body-${safecat}">
+        ${cmds.map(c => `
+          <div class="cmd-row" id="row-${c.cmd}">
+            <div class="cmd-name">.${c.cmd}</div>
+            <label class="tog">
+              <input type="checkbox" id="cmd-${c.cmd}" ${c.enabled?'checked':''} onchange="onCmdChange('${c.cmd}',this.checked,'${safecat}',${cmds.length})">
+              <span class="tog-sl"></span>
+            </label>
+          </div>`).join('')}
+      </div>`;
+    cg.appendChild(card);
+  }
+}
+
+function toggleCat(safecat) {
+  const body = document.getElementById('body-' + safecat);
+  const arr  = document.getElementById('arr-'  + safecat);
+  const open = body.classList.toggle('open');
+  arr.textContent = open ? '▲' : '▼';
+}
+
+function onFeatChange(key, val) {
+  cfgChanges.features[key] = val;
+  markDirty();
+}
+
+function onCmdChange(cmd, val, safecat, total) {
+  cfgChanges.commands[cmd] = val;
+  // update counter
+  const body = document.getElementById('body-' + safecat);
+  if (body) {
+    const checks = body.querySelectorAll('input[type=checkbox]');
+    const onN = [...checks].filter(c => c.checked).length;
+    const hdr = body.previousElementSibling?.querySelector('.cmd-group-hdr-meta');
+    if (hdr) hdr.textContent = `${onN}/${total} enabled`;
+  }
+  markDirty();
+}
+
+function catAll(safecat, val) {
+  const body = document.getElementById('body-' + safecat);
+  if (!body) return;
+  const checks = body.querySelectorAll('input[type=checkbox]');
+  checks.forEach(c => {
+    const cmd = c.id.replace('cmd-', '');
+    c.checked = val;
+    cfgChanges.commands[cmd] = val;
+  });
+  const hdr = body.previousElementSibling?.querySelector('.cmd-group-hdr-meta');
+  if (hdr) hdr.textContent = `${val ? checks.length : 0}/${checks.length} enabled`;
+  markDirty();
+}
+
+async function saveSettings() {
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Saving...';
+  try {
+    const body = {
+      commands: cfgChanges.commands,
+      features: cfgChanges.features,
+    };
+    if (cfgChanges.mode) body.mode = cfgChanges.mode;
+
+    const r = await fetch('/api/pair/settings/' + cfgNum, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Save failed');
+
+    btn.textContent = '✅ Saved! Restarting...';
+    setTimeout(() => {
+      document.getElementById('save-bar').style.display = 'none';
+      btn.disabled = false;
+      btn.textContent = '💾 Save & Restart';
+      cfgChanges = { commands: {}, features: {}, mode: null };
+      // reload config after restart settles
+      setTimeout(loadCfg, 4000);
+    }, 2500);
+  } catch(e) {
+    btn.textContent = '⚠️ ' + e.message;
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = '💾 Save & Restart';
+    }, 3000);
+  }
+}
+
+function showBlocked() {
+  document.getElementById('form-wrap').style.display = 'none';
+  document.getElementById('steps').style.display = 'none';
+  document.getElementById('blk-msg').classList.add('show');
+}
+
+function updateBadge(status) {
+  const b = document.getElementById('status-badge');
+  const t = document.getElementById('status-txt');
+  const m = {
+    pairing:    ['sb-pair', 'Waiting for scan...'],
+    connecting: ['sb-conn', 'Connecting...'],
+    connected:  ['sb-ok',   'Connected ✅'],
+    error:      ['sb-err',  'Error — try again']
+  };
+  const [cls, lbl] = m[status] || ['sb-conn', status];
+  b.className = 'sbadge ' + cls;
+  t.textContent = lbl;
+}
+
+function showErr(m) { const e = document.getElementById('err-msg'); e.textContent = m; e.classList.add('show'); }
+function hideErr() { document.getElementById('err-msg').classList.remove('show'); }
+function setBusy(on) { const b = document.getElementById('pairBtn'); b.disabled = on; b.textContent = on ? '⏳...' : 'Get Code'; }
+
+function resetForm() {
+  curNum = null;
+  if (pollInt) clearInterval(pollInt);
+  if (timerInt) clearInterval(timerInt);
+  document.getElementById('success-box').classList.remove('show');
+  document.getElementById('code-box').classList.remove('show');
+  document.getElementById('blk-msg').classList.remove('show');
+  document.getElementById('form-wrap').style.display = '';
+  document.getElementById('steps').style.display = '';
+  document.getElementById('numIn').value = '';
+  hideErr();
+}
+
+document.getElementById('numIn').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startPair();
+});
+
+/* Particle canvas */
+const canvas = document.getElementById('bg-canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+const pts = [];
+
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+class Pt {
+  constructor() { this.reset(true); }
+  reset(init) {
+    this.x = Math.random() * W;
+    this.y = init ? Math.random() * H : H + 5;
+    this.r = Math.random() * 1.2 + 0.2;
+    this.vy = -(Math.random() * 0.35 + 0.1);
+    this.vx = (Math.random() - .5) * .15;
+    this.a = Math.random() * 0.4 + 0.1;
+    this.c = Math.random() > .6 ? '#25d366' : Math.random() > .5 ? '#00d4ff' : '#128c7e';
+  }
+  step() { this.y += this.vy; this.x += this.vx; if (this.y < -5) this.reset(false); }
+  draw() {
+    ctx.save(); ctx.globalAlpha = this.a;
+    ctx.fillStyle = this.c; ctx.shadowColor = this.c; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+for (let i = 0; i < 90; i++) pts.push(new Pt());
+
+(function loop() {
+  ctx.clearRect(0, 0, W, H);
+  pts.forEach(p => { p.step(); p.draw(); });
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

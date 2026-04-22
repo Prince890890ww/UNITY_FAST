@@ -1,1 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNITY-MD • Control Panel</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Orbitron:wght@700;900&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.0/socket.io.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#03040b;--s1:#07090f;--s2:#0b0e18;--border:#141828;--border2:#1e2235;
+  --accent:#00ff88;--accent2:#00ccff;--purple:#7c3aed;--amber:#f59e0b;
+  --red:#ff3b5c;--green:#00ff88;--text:#e8eaf0;--muted:#3d4460;--muted2:#5c6380;
+}
 
+/* ── Base ── */
+body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh;overflow-x:hidden}
+
+/* Animated background orbs */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(ellipse 60% 50% at 8% 0%,rgba(0,255,136,0.06) 0%,transparent 55%),
+    radial-gradient(ellipse 50% 55% at 92% 100%,rgba(0,204,255,0.05) 0%,transparent 55%),
+    radial-gradient(ellipse 35% 40% at 85% 15%,rgba(124,58,237,0.04) 0%,transparent 55%);
+  animation:bgShift 15s ease-in-out infinite alternate;
+}
+@keyframes bgShift{
+  0%{background:radial-gradient(ellipse 60% 50% at 8% 0%,rgba(0,255,136,0.06) 0%,transparent 55%),radial-gradient(ellipse 50% 55% at 92% 100%,rgba(0,204,255,0.05) 0%,transparent 55%),radial-gradient(ellipse 35% 40% at 85% 15%,rgba(124,58,237,0.04) 0%,transparent 55%)}
+  100%{background:radial-gradient(ellipse 60% 50% at 15% 10%,rgba(0,255,136,0.07) 0%,transparent 55%),radial-gradient(ellipse 50% 55% at 85% 95%,rgba(0,204,255,0.06) 0%,transparent 55%),radial-gradient(ellipse 35% 40% at 75% 20%,rgba(124,58,237,0.05) 0%,transparent 55%)}
+}
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:linear-gradient(rgba(0,255,136,0.016) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,136,0.016) 1px,transparent 1px);
+  background-size:52px 52px;
+}
+
+/* Floating scan line */
+.scan-line{position:fixed;left:0;top:0;width:100%;height:1px;background:linear-gradient(90deg,transparent 0%,rgba(0,255,136,0.15) 50%,transparent 100%);animation:scanDown 8s linear infinite;z-index:0;pointer-events:none}
+@keyframes scanDown{0%{top:-1px;opacity:0}10%{opacity:1}90%{opacity:1}100%{top:100vh;opacity:0}}
+
+/* ── Sidebar ── */
+.sidebar{
+  position:fixed;left:0;top:0;bottom:0;width:240px;
+  background:linear-gradient(180deg,var(--s1) 0%,rgba(7,9,15,0.98) 100%);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;z-index:100;
+  box-shadow:4px 0 40px rgba(0,0,0,0.5);
+  animation:sidebarIn .6s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes sidebarIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+/* Top accent line on sidebar */
+.sidebar::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent2),transparent);animation:lineGlow 3s ease-in-out infinite;z-index:1}
+@keyframes lineGlow{0%,100%{opacity:.7}50%{opacity:1}}
+
+.logo-wrap{padding:28px 24px 20px;animation:fadeUp .5s ease .1s both}
+.logo-icon{font-size:2rem;margin-bottom:7px;display:block;filter:drop-shadow(0 0 10px rgba(0,255,136,0.5));animation:iconPulse 3s ease-in-out infinite}
+@keyframes iconPulse{0%,100%{filter:drop-shadow(0 0 10px rgba(0,255,136,0.4))}50%{filter:drop-shadow(0 0 18px rgba(0,255,136,0.7))}}
+.logo-title{
+  font-family:'Orbitron',monospace;font-size:1rem;font-weight:900;letter-spacing:2px;
+  background:linear-gradient(135deg,var(--accent) 0%,var(--accent2) 60%,var(--accent) 100%);
+  background-size:200% 100%;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:shimmer 5s linear infinite;
+}
+@keyframes shimmer{0%{background-position:200%}100%{background-position:-200%}}
+.logo-sub{color:var(--muted);font-size:0.6rem;letter-spacing:3px;text-transform:uppercase;margin-top:3px}
+.logo-divider{height:1px;background:linear-gradient(90deg,var(--border),transparent);margin:0 24px}
+
+.nav-section{padding:20px 24px 6px;color:var(--muted);font-size:0.58rem;letter-spacing:3px;text-transform:uppercase;font-family:'JetBrains Mono',monospace}
+.nav-item{
+  display:flex;align-items:center;gap:12px;padding:10px 24px;
+  color:var(--muted2);cursor:pointer;
+  transition:all 0.22s cubic-bezier(.22,1,.36,1);
+  font-size:0.88rem;font-weight:600;
+  border:none;background:none;width:100%;text-align:left;text-decoration:none;
+  border-left:2px solid transparent;position:relative;
+}
+.nav-item::after{content:'';position:absolute;right:12px;width:4px;height:4px;border-radius:50%;background:var(--accent);opacity:0;transform:scale(0);transition:all .2s}
+.nav-item .nav-icon{font-size:1rem;width:20px;text-align:center;flex-shrink:0;transition:all .22s}
+.nav-item:hover{color:var(--text);background:rgba(0,255,136,0.05);border-left-color:rgba(0,255,136,0.4)}
+.nav-item:hover .nav-icon{filter:drop-shadow(0 0 5px rgba(0,255,136,0.6));transform:scale(1.1)}
+.nav-item.active{color:var(--accent);background:rgba(0,255,136,0.07);border-left-color:var(--accent)}
+.nav-item.active::after{opacity:1;transform:scale(1)}
+.nav-item.active .nav-icon{filter:drop-shadow(0 0 8px rgba(0,255,136,0.7))}
+.nav-badge{margin-left:auto;background:rgba(0,255,136,0.12);color:var(--accent);font-size:0.63rem;padding:2px 8px;border-radius:99px;font-family:'JetBrains Mono',monospace;border:1px solid rgba(0,255,136,0.2)}
+
+.sidebar-bottom{margin-top:auto;padding:20px 24px;border-top:1px solid var(--border)}
+.bot-mini{
+  display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:12px;
+  background:rgba(0,255,136,0.05);border:1px solid rgba(0,255,136,0.15);
+  margin-bottom:12px;transition:all .2s;
+}
+.bot-mini:hover{background:rgba(0,255,136,0.08);border-color:rgba(0,255,136,0.25)}
+.bm-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px rgba(0,255,136,0.8);animation:pulse 2s infinite;flex-shrink:0}
+.bm-info{flex:1;min-width:0}
+.bm-lbl{font-size:0.6rem;color:var(--muted);font-family:'JetBrains Mono',monospace;letter-spacing:1px}
+.bm-num{font-size:0.8rem;color:var(--accent);font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.logout-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:9px 14px;background:rgba(255,59,92,0.07);border:1px solid rgba(255,59,92,0.18);border-radius:9px;color:#ff7090;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .2s;text-decoration:none}
+.logout-btn:hover{background:rgba(255,59,92,0.14);border-color:rgba(255,59,92,0.3);color:#ff3b5c;transform:translateY(-1px)}
+
+/* ── Main ── */
+.main{margin-left:240px;padding:28px;min-height:100vh;position:relative;z-index:1}
+.page{display:none}
+.page.active{display:block;animation:pageIn .32s cubic-bezier(.22,1,.36,1)}
+@keyframes pageIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+.ph{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:12px}
+.ph-title{font-size:1.5rem;font-weight:800;letter-spacing:-.5px}
+.ph-sub{color:var(--muted);font-size:0.8rem;margin-top:2px}
+.ph-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+/* ── Stat Cards ── */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px}
+.card{
+  background:var(--s2);border:1px solid var(--border);border-radius:16px;padding:22px;
+  position:relative;overflow:hidden;
+  transition:all .28s cubic-bezier(.22,1,.36,1);
+  animation:cardIn .5s cubic-bezier(.22,1,.36,1) both;
+}
+.card:nth-child(1){animation-delay:.05s}
+.card:nth-child(2){animation-delay:.1s}
+.card:nth-child(3){animation-delay:.15s}
+.card:nth-child(4){animation-delay:.2s}
+.card:nth-child(5){animation-delay:.25s}
+.card:nth-child(6){animation-delay:.3s}
+@keyframes cardIn{from{opacity:0;transform:translateY(16px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+.card::after{content:'';position:absolute;inset:0;background:radial-gradient(circle at 80% 20%,rgba(255,255,255,0.02),transparent 60%);pointer-events:none}
+.card:hover{transform:translateY(-4px);box-shadow:0 14px 35px rgba(0,0,0,0.35);border-color:var(--border2)}
+.card-stripe{position:absolute;top:0;left:0;right:0;height:2px}
+.cg{background:linear-gradient(90deg,var(--green),rgba(0,255,136,0.3),transparent)}.card:has(.cg):hover{box-shadow:0 14px 35px rgba(0,0,0,0.35),0 0 25px rgba(0,255,136,0.06)}
+.cb{background:linear-gradient(90deg,var(--accent2),rgba(0,204,255,0.3),transparent)}.card:has(.cb):hover{box-shadow:0 14px 35px rgba(0,0,0,0.35),0 0 25px rgba(0,204,255,0.06)}
+.cp{background:linear-gradient(90deg,var(--purple),rgba(124,58,237,0.3),transparent)}.card:has(.cp):hover{box-shadow:0 14px 35px rgba(0,0,0,0.35),0 0 25px rgba(124,58,237,0.06)}
+.ca{background:linear-gradient(90deg,var(--amber),rgba(245,158,11,0.3),transparent)}.card:has(.ca):hover{box-shadow:0 14px 35px rgba(0,0,0,0.35),0 0 25px rgba(245,158,11,0.06)}
+.cr{background:linear-gradient(90deg,var(--red),rgba(255,59,92,0.3),transparent)}
+.card-icon{font-size:1.4rem;margin-bottom:10px;opacity:.9;display:block;transition:transform .2s}
+.card:hover .card-icon{transform:scale(1.15)}
+.card-label{color:var(--muted);font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;font-family:'JetBrains Mono',monospace;margin-bottom:6px}
+.card-val{font-size:2rem;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--text);line-height:1}
+.card-sub{color:var(--muted);font-size:0.72rem;margin-top:6px}
+
+/* ── Panels ── */
+.panel{background:var(--s2);border:1px solid var(--border);border-radius:16px;overflow:hidden;margin-bottom:18px;transition:border-color .2s}
+.panel:hover{border-color:var(--border2)}
+.panel::before{content:'';display:block;height:1px;background:linear-gradient(90deg,rgba(0,255,136,0.15),transparent);margin:0}
+.panel-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,0.01)}
+.panel-title{font-size:0.9rem;font-weight:700;display:flex;align-items:center;gap:8px}
+.panel-body{padding:20px}
+table{width:100%;border-collapse:collapse}
+th{padding:9px 14px;text-align:left;color:var(--muted);font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-weight:400}
+td{padding:11px 14px;border-bottom:1px solid rgba(255,255,255,0.03);font-size:0.83rem;vertical-align:middle;transition:background .15s}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(0,255,136,0.02)}
+.mono{font-family:'JetBrains Mono',monospace;font-size:0.8rem}
+
+/* ── Badges ── */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:99px;font-size:0.67rem;font-weight:700;letter-spacing:.5px}
+.bg{background:rgba(0,255,136,0.08);color:#00ff88;border:1px solid rgba(0,255,136,0.2)}
+.br{background:rgba(255,59,92,0.08);color:#ff3b5c;border:1px solid rgba(255,59,92,0.2)}
+.bb{background:rgba(0,204,255,0.08);color:#00ccff;border:1px solid rgba(0,204,255,0.2)}
+.bp{background:rgba(124,58,237,0.08);color:#a78bfa;border:1px solid rgba(124,58,237,0.2)}
+.ba{background:rgba(245,158,11,0.08);color:#f59e0b;border:1px solid rgba(245,158,11,0.2)}
+.bdot{width:5px;height:5px;border-radius:50%;background:currentColor}
+
+/* ── Buttons ── */
+.btn{padding:7px 16px;border-radius:9px;border:none;cursor:pointer;font-size:0.78rem;font-weight:700;transition:all .22s cubic-bezier(.22,1,.36,1);display:inline-flex;align-items:center;gap:6px;font-family:'Syne',sans-serif;position:relative;overflow:hidden}
+.btn::after{content:'';position:absolute;inset:0;background:rgba(255,255,255,0.05);opacity:0;transition:opacity .2s}
+.btn:hover{transform:translateY(-2px)}
+.btn:hover::after{opacity:1}
+.btn:active{transform:translateY(0) scale(.97)}
+.btn-green{background:rgba(0,255,136,0.1);color:var(--accent);border:1px solid rgba(0,255,136,0.2)}.btn-green:hover{background:rgba(0,255,136,0.17);border-color:rgba(0,255,136,0.4);box-shadow:0 4px 14px rgba(0,255,136,0.12)}
+.btn-red{background:rgba(255,59,92,0.1);color:#ff3b5c;border:1px solid rgba(255,59,92,0.2)}.btn-red:hover{background:rgba(255,59,92,0.18);box-shadow:0 4px 14px rgba(255,59,92,0.12)}
+.btn-amber{background:rgba(245,158,11,0.1);color:var(--amber);border:1px solid rgba(245,158,11,0.2)}.btn-amber:hover{background:rgba(245,158,11,0.18)}
+.btn-blue{background:rgba(0,204,255,0.1);color:var(--accent2);border:1px solid rgba(0,204,255,0.2)}.btn-blue:hover{background:rgba(0,204,255,0.18);box-shadow:0 4px 14px rgba(0,204,255,0.12)}
+.btn-ghost{background:transparent;color:var(--muted2);border:1px solid var(--border2)}.btn-ghost:hover{border-color:var(--muted);color:var(--text)}
+.btn-sm{padding:4px 10px;font-size:0.72rem}
+
+/* ── Toggles ── */
+.toggle{position:relative;width:42px;height:23px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0;position:absolute}
+.ttrack{position:absolute;inset:0;border-radius:99px;background:#10121e;border:1px solid var(--border2);cursor:pointer;transition:all .28s}
+.ttrack::after{content:'';position:absolute;width:17px;height:17px;left:2px;top:2px;background:var(--muted);border-radius:50%;transition:all .28s;box-shadow:0 1px 4px rgba(0,0,0,0.4)}
+.toggle input:checked+.ttrack{background:rgba(0,255,136,0.15);border-color:rgba(0,255,136,0.4);box-shadow:0 0 10px rgba(0,255,136,0.1)}
+.toggle input:checked+.ttrack::after{transform:translateX(19px);background:var(--accent);box-shadow:0 0 8px rgba(0,255,136,0.5)}
+.twrap{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--border);transition:background .2s}
+.twrap:hover{background:rgba(0,255,136,0.01)}
+.twrap:last-child{border-bottom:none}
+.twrap-label{font-size:0.88rem;font-weight:600;margin-bottom:2px}
+.twrap-desc{font-size:0.74rem;color:var(--muted)}
+
+/* ── Inputs ── */
+input,textarea,select{background:rgba(255,255,255,0.03);border:1px solid var(--border2);border-radius:9px;color:var(--text);padding:9px 13px;font-size:0.85rem;outline:none;width:100%;font-family:'Syne',sans-serif;transition:all .2s}
+input:focus,textarea:focus{border-color:rgba(0,255,136,0.4);background:rgba(0,255,136,0.03);box-shadow:0 0 0 3px rgba(0,255,136,0.06)}
+input::placeholder,textarea::placeholder{color:var(--muted)}
+
+/* ── Alerts ── */
+.alert{padding:10px 15px;border-radius:9px;font-size:0.82rem;margin-bottom:14px;display:none}
+.alert.show{display:flex;align-items:center;gap:8px;animation:fadeUp .3s ease}
+.aok{background:rgba(0,255,136,0.07);border:1px solid rgba(0,255,136,0.2);color:#00ff88}
+.aerr{background:rgba(255,59,92,0.07);border:1px solid rgba(255,59,92,0.2);color:#ff3b5c}
+
+/* ── Session Cards ── */
+.sess-card{background:var(--s1);border:1px solid var(--border);border-radius:13px;padding:16px;margin-bottom:10px;display:flex;align-items:center;gap:14px;transition:all .22s cubic-bezier(.22,1,.36,1);flex-wrap:wrap}
+.sess-card:hover{border-color:var(--border2);background:rgba(0,255,136,0.02);transform:translateX(4px)}
+.sess-card.isblocked{border-color:rgba(255,59,92,0.3);background:rgba(255,59,92,0.02)}
+.sess-card.isstopped{border-color:rgba(245,158,11,0.25);background:rgba(245,158,11,0.015)}
+.sess-ico{width:44px;height:44px;border-radius:12px;background:rgba(0,255,136,0.07);border:1px solid rgba(0,255,136,0.2);display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0;transition:all .2s}
+.sess-card:hover .sess-ico{transform:scale(1.08);box-shadow:0 0 12px rgba(0,255,136,0.15)}
+.sess-ico.blk{background:rgba(255,59,92,0.07);border-color:rgba(255,59,92,0.2)}
+.sess-ico.stp{background:rgba(245,158,11,0.07);border-color:rgba(245,158,11,0.2)}
+.sess-info{flex:1;min-width:160px}
+.sess-num{font-family:'JetBrains Mono',monospace;font-size:0.92rem;font-weight:700;margin-bottom:4px}
+.sess-meta{font-size:0.73rem;color:var(--muted);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sess-acts{display:flex;gap:6px;flex-wrap:wrap}
+.blk-banner{background:rgba(255,59,92,0.05);border:1px solid rgba(255,59,92,0.18);border-radius:11px;padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:16px;font-size:0.83rem;color:#ff8099}
+.live-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:99px;background:rgba(0,255,136,0.07);border:1px solid rgba(0,255,136,0.15);font-size:0.72rem;color:var(--accent);font-family:'JetBrains Mono',monospace}
+.ldot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 5px rgba(0,255,136,0.6);animation:pulse 1.5s infinite}
+.sg-title{font-size:0.68rem;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;font-family:'JetBrains Mono',monospace}
+
+/* ── Keyframes ── */
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.7)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+
+/* ── Mobile ── */
+@media(max-width:900px){
+  .sidebar{width:64px}
+  .logo-title,.logo-sub,.nav-item span:not(.nav-icon),.nav-section,.bm-info,.logout-btn span,.nav-badge{display:none}
+  .nav-item{padding:12px 0;justify-content:center}
+  .sidebar-bottom{padding:12px 0;display:flex;flex-direction:column;align-items:center;gap:8px}
+  .bot-mini{width:40px;height:40px;border-radius:50%;padding:0;justify-content:center;margin:0}
+  .main{margin-left:64px;padding:16px}
+  .cards{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<div class="scan-line"></div>
+<body>
+
+<div class="sidebar">
+  <div class="logo-wrap">
+    <div class="logo-icon">🧲</div>
+    <div class="logo-title">UNITY-MD</div>
+    <div class="logo-sub">® Unity Team</div>
+  </div>
+  <div class="logo-divider"></div>
+  <div class="nav-section">Main</div>
+  <button class="nav-item active" onclick="nav(this,'dashboard')"><span class="nav-icon">📊</span><span>Dashboard</span></button>
+  <button class="nav-item" onclick="nav(this,'sessions')"><span class="nav-icon">📱</span><span>Numbers</span><span class="nav-badge" id="nb-sess">0</span></button>
+  <button class="nav-item" onclick="nav(this,'groups')"><span class="nav-icon">👥</span><span>Groups</span></button>
+  <button class="nav-item" onclick="nav(this,'users')"><span class="nav-icon">👤</span><span>Users</span></button>
+  <div class="nav-section">Tools</div>
+  <a class="nav-item" href="/pair" target="_blank"><span class="nav-icon">🔑</span><span>Pair Device</span></a>
+  <button class="nav-item" onclick="nav(this,'broadcast')"><span class="nav-icon">📢</span><span>Broadcast</span></button>
+  <button class="nav-item" onclick="nav(this,'plugins')"><span class="nav-icon">🔌</span><span>Plugins</span></button>
+  <button class="nav-item" onclick="nav(this,'audit')"><span class="nav-icon">📋</span><span>Audit Log</span></button>
+  <div class="nav-section">System</div>
+  <button class="nav-item" onclick="nav(this,'settings')"><span class="nav-icon">⚙️</span><span>Bot Settings</span></button>
+  <div class="sidebar-bottom">
+    <div class="bot-mini">
+      <div class="bm-dot" id="sb-dot"></div>
+      <div class="bm-info"><div class="bm-lbl">BOT STATUS</div><div class="bm-num" id="sb-num">Connecting...</div></div>
+    </div>
+    <a class="logout-btn" href="/logout"><span>🚪</span><span>Logout</span></a>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- DASHBOARD -->
+<div class="page active" id="page-dashboard">
+  <div class="ph">
+    <div><div class="ph-title">Control Panel</div><div class="ph-sub">Real-time monitoring &amp; management</div></div>
+    <div class="ph-right">
+      <div class="live-pill"><div class="ldot"></div>LIVE</div>
+      <span id="last-upd" style="color:var(--muted);font-size:0.73rem;font-family:'JetBrains Mono',monospace"></span>
+    </div>
+  </div>
+  <div class="cards">
+    <div class="card"><div class="card-stripe cg"></div><div class="card-icon">🟢</div><div class="card-label">Status</div><div class="card-val" id="d-st">—</div><div class="card-sub" id="d-num">Waiting...</div></div>
+    <div class="card"><div class="card-stripe cp"></div><div class="card-icon">⚡</div><div class="card-label">Commands</div><div class="card-val" id="d-cmd">—</div><div class="card-sub">Plugins loaded</div></div>
+    <div class="card"><div class="card-stripe cb"></div><div class="card-icon">💾</div><div class="card-label">RAM</div><div class="card-val" id="d-ram">—</div><div class="card-sub">MB used</div></div>
+    <div class="card"><div class="card-stripe ca"></div><div class="card-icon">⏱</div><div class="card-label">Uptime</div><div class="card-val" id="d-up">—</div><div class="card-sub">Running</div></div>
+    <div class="card"><div class="card-stripe cg"></div><div class="card-icon">👤</div><div class="card-label">Users</div><div class="card-val" id="d-usr">—</div><div class="card-sub">Registered</div></div>
+    <div class="card"><div class="card-stripe cb"></div><div class="card-icon">👥</div><div class="card-label">Groups</div><div class="card-val" id="d-grp">—</div><div class="card-sub">Active</div></div>
+  </div>
+  <div class="panel" style="margin-bottom:18px">
+    <div class="panel-head"><div class="panel-title">⚡ Quick Actions</div></div>
+    <div class="panel-body" style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-amber" onclick="restartBot()">🔄 Restart Bot</button>
+      <button class="btn btn-blue" onclick="backupDB()">💾 Backup DB</button>
+      <button class="btn btn-green" onclick="navTo('sessions')">📱 Manage Numbers</button>
+      <button class="btn btn-ghost" onclick="loadDash()">🔁 Refresh</button>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">📊 Command Stats <span style="color:var(--muted);font-weight:400;font-size:0.8rem">(7 days)</span></div><button class="btn btn-ghost btn-sm" onclick="loadDash()">🔁</button></div>
+    <table><thead><tr><th>Date</th><th>Commands</th><th>Unique Users</th></tr></thead>
+    <tbody id="stats-tb"><tr><td colspan="3" style="text-align:center;color:var(--muted);padding:24px">Loading...</td></tr></tbody></table>
+  </div>
+</div>
+
+<!-- SESSIONS -->
+<div class="page" id="page-sessions">
+  <div class="ph">
+    <div><div class="ph-title">📱 Numbers</div><div class="ph-sub">Manage connected WhatsApp numbers</div></div>
+    <div class="ph-right">
+      <button class="btn btn-green" onclick="loadSessions()">🔁 Refresh</button>
+      <a class="btn btn-blue" href="/pair" target="_blank">➕ Add Number</a>
+    </div>
+  </div>
+
+  <!-- Blocked Numbers Section -->
+  <div id="blk-section" style="display:none;margin-bottom:18px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="font-size:0.72rem;text-transform:uppercase;letter-spacing:2px;color:#ff3b5c;font-family:'JetBrains Mono',monospace;font-weight:700">🔒 Blocked Numbers</span>
+      <span id="blk-count" style="background:rgba(255,59,92,0.12);border:1px solid rgba(255,59,92,0.25);color:#ff3b5c;border-radius:20px;padding:2px 10px;font-size:0.72rem;font-family:'JetBrains Mono',monospace"></span>
+    </div>
+    <div id="blk-list"></div>
+  </div>
+
+  <div style="margin-bottom:14px"><input type="text" id="sess-q" placeholder="🔍 Search by number..." oninput="filterSess()" style="max-width:300px"></div>
+  <div id="sess-list"><div style="text-align:center;color:var(--muted);padding:40px">Loading...</div></div>
+</div>
+
+<!-- GROUPS -->
+<div class="page" id="page-groups">
+  <div class="ph"><div><div class="ph-title">👥 Groups</div></div><div class="ph-right"><button class="btn btn-green" onclick="loadGroups()">🔁 Refresh</button></div></div>
+  <div class="panel"><table><thead><tr><th>Group Name</th><th>Members</th><th>Bot Role</th><th>Actions</th></tr></thead>
+  <tbody id="grp-tb"><tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">Loading...</td></tr></tbody></table></div>
+</div>
+
+<!-- USERS -->
+<div class="page" id="page-users">
+  <div class="ph"><div><div class="ph-title">👤 Users</div></div><div class="ph-right"><button class="btn btn-green" onclick="loadUsers()">🔁 Refresh</button></div></div>
+  <div class="panel"><table><thead><tr><th>Number</th><th>Commands</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody id="usr-tb"><tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">Loading...</td></tr></tbody></table></div>
+</div>
+
+<!-- BROADCAST -->
+<div class="page" id="page-broadcast">
+  <div class="ph"><div><div class="ph-title">📢 Broadcast</div><div class="ph-sub">Send to all chats, groups or private chats</div></div></div>
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">✍️ Compose Message</div></div>
+    <div class="panel-body">
+      <div class="alert" id="bc-a"></div>
+      <textarea id="bc-msg" rows="6" placeholder="Type your broadcast message here..." style="margin-bottom:14px"></textarea>
+      <div style="margin-bottom:14px">
+        <label style="font-size:13px;color:#aaa;display:block;margin-bottom:8px">📌 Send to:</label>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="radio" name="bc-type" value="connected" checked> 🤖 Connected Numbers
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="radio" name="bc-type" value="all"> 🌐 All Chats
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="radio" name="bc-type" value="groups"> 👥 Groups Only
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="radio" name="bc-type" value="private"> 👤 Private Only
+          </label>
+        </div>
+        <div id="bc-connected-info" style="margin-top:10px;padding:8px 12px;background:rgba(0,255,128,0.07);border:1px solid rgba(0,255,128,0.2);border-radius:8px;font-size:12px;color:#0f9">
+          ✅ Message will be sent to each connected bot's <b>own inbox</b> only. Only the bot owner can read it.
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn btn-green" onclick="sendBroadcast()">📢 Send Broadcast</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PLUGINS -->
+<div class="page" id="page-plugins">
+  <div class="ph">
+    <div><div class="ph-title">🔌 Plugins</div><div class="ph-sub" id="plg-count">Loading...</div></div>
+    <div class="ph-right"><input type="text" id="plg-q" placeholder="🔍 Search..." oninput="filterPlg()" style="width:200px"><button class="btn btn-green" onclick="loadPlugins()">🔁</button></div>
+  </div>
+  <div class="panel"><table><thead><tr><th>Command</th><th>Owner Only</th><th>Admin Only</th><th>Group Only</th></tr></thead>
+  <tbody id="plg-tb"><tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">Loading...</td></tr></tbody></table></div>
+</div>
+
+<!-- AUDIT -->
+<div class="page" id="page-audit">
+  <div class="ph"><div><div class="ph-title">📋 Audit Log</div></div><div class="ph-right"><button class="btn btn-red" onclick="clearAudit()">🗑 Clear</button><button class="btn btn-green" onclick="loadAudit()">🔁 Refresh</button></div></div>
+  <div class="panel"><table><thead><tr><th>Command</th><th>User</th><th>Time</th><th>Status</th></tr></thead>
+  <tbody id="aud-tb"><tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">Loading...</td></tr></tbody></table></div>
+</div>
+
+<!-- SETTINGS -->
+<div class="page" id="page-settings">
+  <div class="ph">
+    <div><div class="ph-title">⚙️ Bot Settings</div><div class="ph-sub">Configure features &amp; behavior</div></div>
+    <div class="ph-right"><button class="btn btn-green" onclick="saveSettings()">💾 Save All Settings</button></div>
+  </div>
+  <div class="alert" id="set-a" style="margin-bottom:16px"></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">🤖 Auto Features</div></div>
+      <div class="panel-body">
+        <div class="twrap"><div><div class="twrap-label">Auto Read</div><div class="twrap-desc">Auto-read all incoming messages</div></div><label class="toggle"><input type="checkbox" id="s-autoread"><div class="ttrack"></div></label></div>
+        <div class="twrap"><div><div class="twrap-label">Auto Status View</div><div class="twrap-desc">Auto-view contact status updates</div></div><label class="toggle"><input type="checkbox" id="s-autostatus"><div class="ttrack"></div></label></div>
+        <div class="twrap"><div><div class="twrap-label">Auto Typing</div><div class="twrap-desc">Show typing when processing</div></div><label class="toggle"><input type="checkbox" id="s-autotyping" checked><div class="ttrack"></div></label></div>
+        <div class="twrap"><div><div class="twrap-label">Always Online</div><div class="twrap-desc">Keep bot status online</div></div><label class="toggle"><input type="checkbox" id="s-online"><div class="ttrack"></div></label></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">🛡️ Protection</div></div>
+      <div class="panel-body">
+        <div class="twrap"><div><div class="twrap-label">Anti Delete</div><div class="twrap-desc">Reveal deleted messages in groups</div></div><label class="toggle"><input type="checkbox" id="s-antidelete"><div class="ttrack"></div></label></div>
+        <div class="twrap"><div><div class="twrap-label">Anti Link</div><div class="twrap-desc">Remove unauthorized group invite links</div></div><label class="toggle"><input type="checkbox" id="s-antilink"><div class="ttrack"></div></label></div>
+        <div class="twrap"><div><div class="twrap-label">Anti Spam</div><div class="twrap-desc">Rate-limit repeated commands</div></div><label class="toggle"><input type="checkbox" id="s-antispam" checked><div class="ttrack"></div></label></div>
+        <div class="twrap"><div><div class="twrap-label">Anti Hijack</div><div class="twrap-desc">Block group hijack attempts</div></div><label class="toggle"><input type="checkbox" id="s-antihijack" checked><div class="ttrack"></div></label></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">💬 Bot Behavior</div></div>
+      <div class="panel-body">
+        <div class="twrap"><div><div class="twrap-label">Public Mode</div><div class="twrap-desc">All users can use the bot</div></div><label class="toggle"><input type="checkbox" id="s-public" checked><div class="ttrack"></div></label></div>
+        <div class="twrap"><div><div class="twrap-label">Private Mode</div><div class="twrap-desc">Owner-only bot usage</div></div><label class="toggle"><input type="checkbox" id="s-private"><div class="ttrack"></div></label></div>
+        <div class="twrap"><div><div class="twrap-label">Groups Only</div><div class="twrap-desc">Bot works only in groups</div></div><label class="toggle"><input type="checkbox" id="s-grouponly"><div class="ttrack"></div></label></div>
+        <div class="twrap"><div><div class="twrap-label">Welcome Message</div><div class="twrap-desc">Greet new group members</div></div><label class="toggle"><input type="checkbox" id="s-welcome" checked><div class="ttrack"></div></label></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">🔧 System</div></div>
+      <div class="panel-body">
+        <div class="sg-title">Bot Info</div>
+        <div id="sys-info" style="color:var(--muted2);font-size:0.8rem;line-height:2.1;font-family:'JetBrains Mono',monospace;margin-bottom:18px">Loading...</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn btn-amber" onclick="restartBot()">🔄 Restart Bot</button>
+          <button class="btn btn-blue" onclick="backupDB()">💾 Backup Database</button>
+          <button class="btn btn-red" onclick="clearAudit()">🗑️ Clear Audit Logs</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<script>
+const socket = io();
+let allSess = [], allPlg = [];
+
+// Nav
+function nav(el, page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  el.classList.add('active');
+  ({sessions:loadSessions,groups:loadGroups,users:loadUsers,plugins:loadPlugins,audit:loadAudit,settings:loadSettings})[page]?.();
+}
+function navTo(page) {
+  const el = document.querySelector('[onclick*="nav(this,\'' + page + '\'"]');
+  if(el) nav(el, page);
+}
+
+// WS
+socket.on('status', d => {
+  document.getElementById('d-st').textContent  = d.online ? 'Online' : 'Offline';
+  document.getElementById('d-cmd').textContent = d.commands ?? '—';
+  document.getElementById('d-ram').textContent = d.ram ?? '—';
+  document.getElementById('d-num').textContent = d.botNumber ? '+'+d.botNumber : 'Not connected';
+  document.getElementById('sb-num').textContent = d.botNumber ? '+'+d.botNumber : 'Offline';
+  document.getElementById('sb-dot').style.background = d.online ? 'var(--accent)' : 'var(--red)';
+  document.getElementById('last-upd').textContent = new Date().toLocaleTimeString();
+  const h=Math.floor((d.uptime||0)/3600), m=Math.floor(((d.uptime||0)%3600)/60);
+  document.getElementById('d-up').textContent = h+'h '+m+'m';
+});
+
+// Dashboard
+async function loadDash() {
+  try {
+    const r = await api('/api/stats');
+    document.getElementById('d-usr').textContent = r.users ?? '—';
+    document.getElementById('d-grp').textContent = r.groups ?? '—';
+    const tb = document.getElementById('stats-tb');
+    if (!r.stats?.length) { tb.innerHTML='<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:24px">No data yet</td></tr>'; return; }
+    tb.innerHTML = r.stats.map(s=>`<tr><td class="mono">${s.date}</td><td class="mono" style="color:var(--accent)">${s.totalCommands||0}</td><td class="mono">${s.uniqueUsers?.length||0}</td></tr>`).join('');
+  } catch(e) {}
+}
+
+// Sessions
+async function loadSessions() {
+  const r = await api('/api/sessions');
+  allSess = r.sessions || [];
+  document.getElementById('nb-sess').textContent = allSess.length;
+  const blocked = allSess.filter(s => s.isBlocked);
+  const active  = allSess.filter(s => !s.isBlocked);
+
+  // Render blocked section
+  const blkSec   = document.getElementById('blk-section');
+  const blkList  = document.getElementById('blk-list');
+  const blkCount = document.getElementById('blk-count');
+  if (blocked.length) {
+    blkSec.style.display = 'block';
+    blkCount.textContent = blocked.length + ' blocked';
+    blkList.innerHTML = blocked.map(s => {
+      const num = s.number || s.userId || 'Unknown';
+      return `<div class="sess-card isblocked" style="margin-bottom:8px">
+        <div class="sess-ico blk">🔒</div>
+        <div class="sess-info">
+          <div class="sess-num">+${num}</div>
+          <div class="sess-meta"><span class="badge br"><span class="bdot"></span>BLOCKED</span></div>
+        </div>
+        <div class="sess-acts">
+          <button class="btn btn-green btn-sm" onclick="unblockNum('${num}')">🔓 Unblock</button>
+          <button class="btn btn-ghost btn-sm" onclick="removeNum('${num}')">🗑 Remove</button>
+        </div>
+      </div>`;
+    }).join('');
+  } else {
+    blkSec.style.display = 'none';
+  }
+
+  renderSess(active);
+}
+function renderSess(list) {
+  const el = document.getElementById('sess-list');
+  if (!list.length) { el.innerHTML='<div style="text-align:center;color:var(--muted);padding:40px">No connected numbers.<br><br><a href="/pair" style="color:var(--accent)">+ Add First Number</a></div>'; return; }
+  el.innerHTML = list.map(s => {
+    const num = s.number || s._id || 'Unknown';
+    const blk = !!s.isBlocked, stp = !!s.isStopped;
+    const cls = blk ? 'isblocked' : stp ? 'isstopped' : '';
+    const ico = blk ? '🔒' : stp ? '⏸' : '✅';
+    const icoCls = blk ? 'blk' : stp ? 'stp' : '';
+    const sb = blk ? '<span class="badge br"><span class="bdot"></span>BLOCKED</span>' : stp ? '<span class="badge ba"><span class="bdot"></span>STOPPED</span>' : '<span class="badge bg"><span class="bdot"></span>ACTIVE</span>';
+    const since = s.connectedAt ? new Date(s.connectedAt).toLocaleDateString() : 'N/A';
+    return `<div class="sess-card ${cls}">
+      <div class="sess-ico ${icoCls}">${ico}</div>
+      <div class="sess-info">
+        <div class="sess-num">+${num}</div>
+        <div class="sess-meta">${sb}<span>Since: ${since}</span>${s.groups?`<span>👥 ${s.groups} groups</span>`:''}</div>
+      </div>
+      <div class="sess-acts">
+        ${blk ? `<button class="btn btn-green btn-sm" onclick="unblockNum('${num}')">🔓 Unblock</button>`
+               : `<button class="btn btn-red btn-sm" onclick="blockNum('${num}')">🔒 Block</button>`}
+        ${!blk && !stp ? `<button class="btn btn-amber btn-sm" onclick="stopNum('${num}')">⏹ Stop</button>` : ''}
+        ${!blk && stp  ? `<button class="btn btn-blue btn-sm" onclick="startNum('${num}')">▶ Start</button>` : ''}
+        ${!blk && !stp ? `<button class="btn btn-ghost btn-sm" onclick="startNum('${num}')">🔄 Restart</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="removeNum('${num}')">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function filterSess() { const q=document.getElementById('sess-q').value; const base=allSess.filter(s=>!s.isBlocked); renderSess(q?base.filter(s=>(s.number||s._id||'').includes(q)):base); }
+async function blockNum(n)   { if(!confirm(`Block +${n}?\nThis number cannot use the bot until unblocked.`)) return; const r=await api(`/api/sessions/${n}/block`,'POST'); toast(r.success?`🔒 +${n} blocked`:r.error,r.success); loadSessions(); }
+async function unblockNum(n) { const r=await api(`/api/sessions/${n}/unblock`,'POST'); toast(r.success?`✅ +${n} unblocked`:r.error,r.success); loadSessions(); }
+async function stopNum(n)    { if(!confirm(`Stop bot for +${n}?`)) return; const r=await api(`/api/sessions/${n}/stop`,'POST'); toast(r.success?`⏹ +${n} stopped`:r.error,r.success); loadSessions(); }
+async function startNum(n)   { const r=await api(`/api/sessions/${n}/restart`,'POST'); toast(r.success?`🔄 +${n} restarting...`:r.error,r.success); setTimeout(loadSessions,3000); }
+async function removeNum(n)  { if(!confirm(`Remove +${n} permanently?`)) return; const r=await api(`/api/sessions/${n}/remove`,'POST'); toast(r.success?`🗑 +${n} removed`:r.error,r.success); loadSessions(); }
+
+// Groups
+async function loadGroups() {
+  const r = await api('/api/groups');
+  const tb = document.getElementById('grp-tb');
+  if (!r.groups?.length) { tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">No groups</td></tr>'; return; }
+  tb.innerHTML = r.groups.map(g=>`<tr>
+    <td><strong>${g.name||'Unknown'}</strong><br><span class="mono" style="color:var(--muted);font-size:0.7rem">${g.id}</span></td>
+    <td class="mono">${g.members||0}</td>
+    <td>${g.isBotAdmin?'<span class="badge bg">Admin</span>':'<span class="badge bb">Member</span>'}</td>
+    <td><button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('${g.id}');toast('Copied!')">📋</button></td>
+  </tr>`).join('');
+}
+
+// Users
+async function loadUsers() {
+  const r = await api('/api/users');
+  const tb = document.getElementById('usr-tb');
+  if (!r.users?.length) { tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">No users</td></tr>'; return; }
+  tb.innerHTML = r.users.map(u => {
+    const num = u.jid.replace('@s.whatsapp.net','');
+    const sb = u.isBanned?'<span class="badge br">Banned</span>':u.isOwner?'<span class="badge bp">Owner</span>':'<span class="badge bg">Active</span>';
+    return `<tr><td class="mono">+${num}</td><td class="mono" style="color:var(--accent)">${u.totalCommands||0}</td><td>${sb}</td>
+    <td>${u.isBanned?`<button class="btn btn-green btn-sm" onclick="unbanUser('${encodeURIComponent(u.jid)}')">✅ Unban</button>`:`<button class="btn btn-red btn-sm" onclick="banUser('${encodeURIComponent(u.jid)}')">🚫 Ban</button>`}</td></tr>`;
+  }).join('');
+}
+async function banUser(j)   { if(!confirm('Ban this user?')) return; await api('/api/users/'+j+'/ban','POST'); loadUsers(); }
+async function unbanUser(j) { await api('/api/users/'+j+'/unban','POST'); loadUsers(); }
+
+// Plugins
+async function loadPlugins() {
+  const r = await api('/api/plugins');
+  allPlg = r.plugins || [];
+  document.getElementById('plg-count').textContent = allPlg.length + ' commands loaded';
+  renderPlg(allPlg);
+}
+function renderPlg(list) {
+  const tb = document.getElementById('plg-tb');
+  tb.innerHTML = list.map(p=>`<tr>
+    <td><code style="color:var(--accent);font-size:0.82rem">.${p.command}</code></td>
+    <td>${p.ownerOnly?'<span class="badge bp">Yes</span>':'<span style="color:var(--muted)">—</span>'}</td>
+    <td>${p.adminOnly?'<span class="badge ba">Yes</span>':'<span style="color:var(--muted)">—</span>'}</td>
+    <td>${p.groupOnly?'<span class="badge bb">Yes</span>':'<span style="color:var(--muted)">—</span>'}</td>
+  </tr>`).join('');
+}
+function filterPlg() { const q=document.getElementById('plg-q').value.toLowerCase(); renderPlg(q?allPlg.filter(p=>p.command.includes(q)):allPlg); }
+
+// Audit
+async function loadAudit() {
+  const r = await api('/api/audit');
+  const tb = document.getElementById('aud-tb');
+  if (!r.logs?.length) { tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">No logs yet</td></tr>'; return; }
+  tb.innerHTML = r.logs.map(l=>`<tr>
+    <td><code style="color:var(--accent)">.${l.command}</code></td>
+    <td class="mono">+${l.userJid?.replace('@s.whatsapp.net','')||'N/A'}</td>
+    <td class="mono" style="color:var(--muted)">${new Date(l.timestamp).toLocaleString()}</td>
+    <td>${l.success?'<span class="badge bg">OK</span>':'<span class="badge br">FAIL</span>'}</td>
+  </tr>`).join('');
+}
+async function clearAudit() { if(!confirm('Clear all audit logs?')) return; await api('/api/audit/clear','POST'); loadAudit(); toast('Audit logs cleared',true); }
+
+// Broadcast
+document.addEventListener('change', function(e) {
+  if (e.target && e.target.name === 'bc-type') {
+    const info = document.getElementById('bc-connected-info');
+    if (info) info.style.display = e.target.value === 'connected' ? 'block' : 'none';
+  }
+});
+async function sendBroadcast() {
+  const msg = document.getElementById('bc-msg').value.trim();
+  if (!msg) return toast('Please type a message first');
+  const typeEl = document.querySelector('input[name="bc-type"]:checked');
+  const type = typeEl ? typeEl.value : 'connected';
+  const btn = event.currentTarget; btn.disabled=true; btn.textContent='⏳ Sending...';
+  const r = await api('/api/broadcast','POST',{message:msg, type});
+  if (r.success) {
+    if (type === 'connected') {
+      showAlert(`✅ Sent to ${r.sent} connected number(s)` + (r.failed ? ` | Failed: ${r.failed}` : ''), true, 'bc-a');
+    } else {
+      showAlert(`✅ Sent: ${r.sent} | Failed: ${r.failed} | Total: ${r.total}`, true, 'bc-a');
+    }
+  } else {
+    showAlert('❌ '+(r.error||'Unknown error'), false, 'bc-a');
+  }
+  btn.disabled=false; btn.textContent='📢 Send Broadcast';
+}
+
+// Settings
+async function loadSettings() {
+  try {
+    const r = await api('/api/status');
+    document.getElementById('sys-info').innerHTML = `Bot: ${r.botName||'UNITY-MD'}\nNumber: +${r.botNumber||'N/A'}\nNode: ${r.nodeVersion||'N/A'}\nCommands: ${r.commands||0}\nRAM: ${r.ram||0} MB\nUptime: ${r.uptimeStr||'—'}`.replace(/\n/g,'<br>');
+    const cfg = await api('/api/settings');
+    if (cfg.settings) { const s=cfg.settings; ['autoread','autostatus','autotyping','online','antidelete','antilink','antispam','antihijack','public','private','grouponly','welcome'].forEach(k=>{const el=document.getElementById('s-'+k);if(el&&s[k]!==undefined)el.checked=!!s[k];}); }
+  } catch(e) {}
+}
+async function saveSettings() {
+  const settings={};
+  ['autoread','autostatus','autotyping','online','antidelete','antilink','antispam','antihijack','public','private','grouponly','welcome'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)settings[k]=el.checked;});
+  const r = await api('/api/settings','POST',{settings});
+  showAlert(r.success?'✅ Settings saved!':'❌ '+r.error, r.success, 'set-a');
+}
+async function restartBot() { if(!confirm('Restart the bot?')) return; await api('/api/restart','POST'); toast('🔄 Bot restarting...', true); }
+function backupDB() { window.location.href='/api/backup'; }
+
+// Helpers
+async function api(url, method='GET', body=null) {
+  const opts={method,headers:{}};
+  if(body){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}
+  const r=await fetch(url,opts); return r.json();
+}
+function showAlert(msg, ok, id) {
+  const el=document.getElementById(id); if(!el) return;
+  el.className='alert show '+(ok?'aok':'aerr'); el.textContent=msg;
+  setTimeout(()=>el.classList.remove('show'),4000);
+}
+function toast(msg, ok=true) {
+  const d=document.createElement('div');
+  d.style.cssText=`position:fixed;bottom:28px;right:28px;background:${ok?'rgba(0,255,136,0.12)':'rgba(255,59,92,0.12)'};border:1px solid ${ok?'rgba(0,255,136,0.25)':'rgba(255,59,92,0.25)'};color:${ok?'#00ff88':'#ff3b5c'};padding:10px 18px;border-radius:10px;font-size:0.83rem;font-weight:600;z-index:9999;animation:fadeUp 0.3s ease;font-family:Syne,sans-serif`;
+  d.textContent=msg; document.body.appendChild(d);
+  setTimeout(()=>d.remove(),3000);
+}
+// ── Auth guard ────────────────────────────────────────────
+(async () => {
+  try {
+    const r = await fetch('/api/auth/check');
+    const d = await r.json();
+    if (!d.authenticated) window.location.href = '/login.html';
+  } catch { window.location.href = '/login.html'; }
+})();
+
+// ── Animated counter for card values ─────────────────────
+function animateCount(el, target, suffix='') {
+  const start = 0, dur = 800, startTime = performance.now();
+  const tick = (now) => {
+    const p = Math.min((now - startTime) / dur, 1);
+    const ease = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(start + (target - start) * ease) + suffix;
+    if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+loadDash();
+</script>
+</body>
+</html>

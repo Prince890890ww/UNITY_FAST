@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNITY-MD • Login</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Orbitron:wght@400;700;900&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#03040a;
+  --card:rgba(10,12,25,0.85);
+  --border:rgba(0,255,136,0.12);
+  --border-hover:rgba(0,255,136,0.4);
+  --accent:#00ff88;
+  --accent2:#00d4ff;
+  --accent3:#7b61ff;
+  --text:#e8edf5;
+  --muted:#3a4060;
+  --red:#ff3b5c;
+  --glow:rgba(0,255,136,0.15);
+}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Syne',sans-serif;
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+  overflow:hidden;
+}
+
+/* ── Canvas background ── */
+#bg-canvas{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+/* ── Glow orbs ── */
+.orb{
+  position:fixed;
+  border-radius:50%;
+  filter:blur(80px);
+  pointer-events:none;
+  z-index:0;
+  animation:orbFloat 8s ease-in-out infinite;
+}
+.orb1{width:400px;height:400px;background:radial-gradient(circle,rgba(0,255,136,0.07),transparent 70%);top:-100px;left:-100px;animation-delay:0s}
+.orb2{width:350px;height:350px;background:radial-gradient(circle,rgba(0,212,255,0.06),transparent 70%);bottom:-80px;right:-80px;animation-delay:3s}
+.orb3{width:250px;height:250px;background:radial-gradient(circle,rgba(123,97,255,0.05),transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);animation-delay:1.5s}
+
+@keyframes orbFloat{
+  0%,100%{transform:translate(0,0) scale(1)}
+  50%{transform:translate(20px,-20px) scale(1.05)}
+}
+
+/* ── Grid overlay ── */
+.grid-overlay{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(0,255,136,0.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,255,136,0.025) 1px,transparent 1px);
+  background-size:60px 60px;
+  mask-image:radial-gradient(ellipse 80% 80% at 50% 50%,black 30%,transparent 100%);
+}
+
+/* ── Wrap ── */
+.wrap{
+  width:100%;max-width:420px;
+  position:relative;z-index:1;
+  animation:wrapIn .7s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes wrapIn{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Logo ── */
+.logo-area{text-align:center;margin-bottom:40px}
+.logo-icon-wrap{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:80px;height:80px;border-radius:24px;
+  background:linear-gradient(135deg,rgba(0,255,136,0.1),rgba(0,212,255,0.08));
+  border:1px solid rgba(0,255,136,0.2);
+  margin-bottom:18px;
+  font-size:2.4rem;
+  position:relative;
+  animation:logoPulse 3s ease-in-out infinite;
+  box-shadow:0 0 30px rgba(0,255,136,0.1), inset 0 0 20px rgba(0,255,136,0.05);
+}
+@keyframes logoPulse{
+  0%,100%{box-shadow:0 0 30px rgba(0,255,136,0.1),inset 0 0 20px rgba(0,255,136,0.05)}
+  50%{box-shadow:0 0 50px rgba(0,255,136,0.2),inset 0 0 30px rgba(0,255,136,0.1)}
+}
+.logo-icon-wrap::after{
+  content:'';position:absolute;inset:-1px;border-radius:24px;
+  background:linear-gradient(135deg,rgba(0,255,136,0.3),transparent,rgba(0,212,255,0.2));
+  mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  mask-composite:exclude;
+  padding:1px;
+  pointer-events:none;
+}
+.logo-title{
+  font-family:'Orbitron',monospace;
+  font-size:1.7rem;font-weight:900;
+  background:linear-gradient(135deg,var(--accent) 0%,var(--accent2) 50%,var(--accent) 100%);
+  background-size:200% 100%;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  letter-spacing:3px;
+  animation:shimmer 4s linear infinite;
+}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.logo-sub{
+  color:var(--muted);font-size:0.62rem;letter-spacing:5px;
+  text-transform:uppercase;margin-top:6px;
+  font-family:'JetBrains Mono',monospace;
+}
+
+/* ── Card ── */
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:22px;
+  padding:38px;
+  position:relative;
+  overflow:hidden;
+  backdrop-filter:blur(20px);
+  -webkit-backdrop-filter:blur(20px);
+  box-shadow:
+    0 0 0 1px rgba(0,255,136,0.05),
+    0 30px 60px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+  transition:border-color .3s,box-shadow .3s;
+}
+.card:hover{
+  border-color:rgba(0,255,136,0.2);
+  box-shadow:0 0 0 1px rgba(0,255,136,0.08),0 30px 80px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.05),0 0 40px rgba(0,255,136,0.04);
+}
+
+/* Top shimmer line */
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(0,255,136,0.6),rgba(0,212,255,0.4),transparent);
+  animation:topLine 3s ease-in-out infinite;
+}
+@keyframes topLine{0%,100%{opacity:.6}50%{opacity:1}}
+
+/* Corner accents */
+.card::after{
+  content:'';position:absolute;
+  top:-1px;right:-1px;width:60px;height:60px;
+  background:linear-gradient(225deg,rgba(0,212,255,0.15),transparent);
+  border-radius:0 22px 0 0;
+  pointer-events:none;
+}
+
+/* ── Field ── */
+.field-label{
+  display:block;
+  color:rgba(0,255,136,0.5);
+  font-size:0.62rem;letter-spacing:3px;
+  text-transform:uppercase;
+  margin-bottom:10px;
+  font-family:'JetBrains Mono',monospace;
+}
+.field-wrap{position:relative;margin-bottom:24px}
+
+input[type=password],input[type=text]{
+  width:100%;
+  padding:14px 48px 14px 18px;
+  background:rgba(0,255,136,0.03);
+  border:1.5px solid rgba(0,255,136,0.1);
+  border-radius:13px;
+  color:var(--text);
+  font-size:1rem;
+  outline:none;
+  transition:all .25s;
+  font-family:'Syne',sans-serif;
+  letter-spacing:.5px;
+}
+input[type=password]:focus,input[type=text]:focus{
+  border-color:rgba(0,255,136,0.4);
+  background:rgba(0,255,136,0.05);
+  box-shadow:0 0 0 4px rgba(0,255,136,0.06), 0 0 20px rgba(0,255,136,0.05);
+}
+input::placeholder{color:rgba(58,64,96,0.8)}
+
+.toggle-pw{
+  position:absolute;right:15px;top:50%;transform:translateY(-50%);
+  cursor:pointer;color:var(--muted);font-size:1.1rem;user-select:none;
+  transition:color .2s;
+}
+.toggle-pw:hover{color:var(--accent)}
+
+/* ── Button ── */
+.login-btn{
+  width:100%;padding:15px;
+  background:linear-gradient(135deg,rgba(0,255,136,0.12) 0%,rgba(0,212,255,0.08) 100%);
+  border:1px solid rgba(0,255,136,0.25);
+  border-radius:13px;
+  color:var(--accent);
+  font-size:0.95rem;font-weight:700;
+  cursor:pointer;
+  transition:all .25s cubic-bezier(.22,1,.36,1);
+  font-family:'Syne',sans-serif;
+  letter-spacing:.5px;
+  position:relative;overflow:hidden;
+}
+.login-btn::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,rgba(0,255,136,0.08),transparent);
+  opacity:0;transition:opacity .25s;
+}
+.login-btn:hover{
+  background:linear-gradient(135deg,rgba(0,255,136,0.2),rgba(0,212,255,0.12));
+  border-color:rgba(0,255,136,0.4);
+  transform:translateY(-2px);
+  box-shadow:0 8px 25px rgba(0,255,136,0.12), 0 0 30px rgba(0,255,136,0.06);
+}
+.login-btn:hover::before{opacity:1}
+.login-btn:active{transform:translateY(0);box-shadow:none}
+
+/* Button ripple */
+.login-btn .ripple{
+  position:absolute;border-radius:50%;
+  background:rgba(0,255,136,0.2);
+  transform:scale(0);animation:rippleAnim .6s linear;
+  pointer-events:none;
+}
+@keyframes rippleAnim{to{transform:scale(4);opacity:0}}
+
+/* ── Error ── */
+.err-box{
+  background:rgba(255,59,92,0.06);
+  border:1px solid rgba(255,59,92,0.2);
+  border-radius:11px;padding:12px 15px;
+  color:var(--red);font-size:0.83rem;
+  margin-bottom:20px;display:none;
+  align-items:center;gap:8px;
+  animation:fadeUp .3s ease;
+}
+.err-box.show{display:flex}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Footer ── */
+.footer-txt{
+  text-align:center;margin-top:26px;
+  color:rgba(58,64,96,0.5);
+  font-size:0.65rem;letter-spacing:3px;
+  text-transform:uppercase;
+  font-family:'JetBrains Mono',monospace;
+}
+
+/* ── Scan line animation ── */
+.scan-line{
+  position:fixed;top:0;left:0;width:100%;height:2px;
+  background:linear-gradient(90deg,transparent,rgba(0,255,136,0.3),transparent);
+  animation:scanDown 6s linear infinite;
+  z-index:0;pointer-events:none;
+}
+@keyframes scanDown{0%{top:-2px}100%{top:100vh}}
+</style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+<div class="orb orb3"></div>
+<div class="grid-overlay"></div>
+<div class="scan-line"></div>
+
+<div class="wrap">
+  <div class="logo-area">
+    <div class="logo-icon-wrap">🧲</div>
+    <div class="logo-title">UNITY-MD</div>
+    <div class="logo-sub">® Unity Team Control Panel</div>
+  </div>
+
+  <div class="card">
+    <div class="err-box" id="err-box">❌ <span>Incorrect password. Try again.</span></div>
+    <form id="loginForm" onsubmit="handleLogin(event)">
+      <label class="field-label">Admin Password</label>
+      <div class="field-wrap">
+        <input type="password" id="pw" name="password" placeholder="Enter dashboard password" autofocus required>
+        <span class="toggle-pw" onclick="togglePw()">👁</span>
+      </div>
+      <button type="submit" class="login-btn" onclick="ripple(event)">🔐 Login to Dashboard</button>
+    </form>
+  </div>
+
+  <div class="footer-txt">❮❮ UNITY-MD ❯❯ • ® UNITY TEAM</div>
+</div>
+
+<script>
+/* Error check */
+if (window.location.search.includes('error=1')) document.getElementById('err-box').classList.add('show');
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const password = document.getElementById('pw').value;
+  const btn = document.querySelector('.login-btn');
+  btn.textContent = '⏳ Logging in...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    const data = await res.json();
+    if (data.success || data.ok) {
+      window.location.href = '/';
+    } else {
+      window.location.href = '/login?error=1';
+    }
+  } catch (err) {
+    window.location.href = '/login?error=1';
+  }
+}
+
+/* Toggle password */
+function togglePw() {
+  const i = document.getElementById('pw');
+  i.type = i.type === 'password' ? 'text' : 'password';
+}
+
+/* Button ripple */
+function ripple(e) {
+  const btn = e.currentTarget;
+  const r = document.createElement('span');
+  const d = Math.max(btn.clientWidth, btn.clientHeight);
+  const rect = btn.getBoundingClientRect();
+  r.className = 'ripple';
+  r.style.cssText = `width:${d}px;height:${d}px;left:${e.clientX-rect.left-d/2}px;top:${e.clientY-rect.top-d/2}px`;
+  btn.appendChild(r);
+  setTimeout(() => r.remove(), 700);
+}
+
+/* Particle canvas */
+const canvas = document.getElementById('bg-canvas');
+const ctx = canvas.getContext('2d');
+let W, H, particles = [];
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+class Particle {
+  constructor() { this.reset(true); }
+  reset(init) {
+    this.x = Math.random() * W;
+    this.y = init ? Math.random() * H : H + 5;
+    this.size = Math.random() * 1.5 + 0.3;
+    this.speedY = -(Math.random() * 0.4 + 0.1);
+    this.speedX = (Math.random() - 0.5) * 0.2;
+    this.opacity = Math.random() * 0.5 + 0.1;
+    this.color = Math.random() > 0.7 ? '#00d4ff' : '#00ff88';
+  }
+  update() {
+    this.y += this.speedY;
+    this.x += this.speedX;
+    if (this.y < -5) this.reset(false);
+  }
+  draw() {
+    ctx.save();
+    ctx.globalAlpha = this.opacity;
+    ctx.fillStyle = this.color;
+    ctx.shadowColor = this.color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+for (let i = 0; i < 80; i++) particles.push(new Particle());
+
+function animate() {
+  ctx.clearRect(0, 0, W, H);
+  particles.forEach(p => { p.update(); p.draw(); });
+  requestAnimationFrame(animate);
+}
+animate();
+</script>
+</body>
+</html>
