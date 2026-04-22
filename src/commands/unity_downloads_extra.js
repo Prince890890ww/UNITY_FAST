@@ -103,29 +103,120 @@ module.exports = {
         });
       }
       await m.react('⏳');
-      try {
-        const res  = await axios.get(`https://www.dark-yasiya-api.site/download/mfire?url=${encodeURIComponent(q)}`, { timeout: 30000 });
-        const data = res.data;
 
-        if (!data?.status || !data?.result?.download_url) {
-          await m.react('❌');
-          return m.reply(`${tr('dl_mediafire_fail')}\n\n${cfg.footer}`);
-        }
+      // ── 10+ API fallback chain ─────────────────────────
+      const mfApis = [
+        // 1. Dark Yasiya
+        async () => {
+          const r = await axios.get(`https://www.dark-yasiya-api.site/download/mfire?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.result || r.data;
+          if (!d?.download_url) throw new Error('no download_url');
+          return { url: d.download_url, name: d.name, size: d.size, type: d.fileType };
+        },
+        // 2. Siputzx
+        async () => {
+          const r = await axios.get(`https://api.siputzx.my.id/api/d/mfire?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.data || r.data;
+          const url = d?.download_url || d?.dl || d?.url;
+          if (!url) throw new Error('no url');
+          return { url, name: d?.filename || d?.name, size: d?.size };
+        },
+        // 3. Agatz
+        async () => {
+          const r = await axios.get(`https://api.agatz.xyz/api/mediafire?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.data || r.data;
+          const url = d?.download_url || d?.url;
+          if (!url) throw new Error('no url');
+          return { url, name: d?.filename || d?.name, size: d?.size };
+        },
+        // 4. Paxsenix
+        async () => {
+          const r = await axios.get(`https://paxsenix.serv00.net/api/mediafire?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.result || r.data;
+          const url = d?.download_url || d?.url;
+          if (!url) throw new Error('no url');
+          return { url, name: d?.filename || d?.name, size: d?.size };
+        },
+        // 5. Ndevapi
+        async () => {
+          const r = await axios.get(`https://ndevapi.com/download/mediafire?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.data || r.data;
+          const url = d?.download_url || d?.url;
+          if (!url) throw new Error('no url');
+          return { url, name: d?.filename || d?.name, size: d?.size };
+        },
+        // 6. XTeam
+        async () => {
+          const r = await axios.get(`https://api.xteam.xyz/mediafire?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.result || r.data;
+          const url = d?.download_url || d?.url;
+          if (!url) throw new Error('no url');
+          return { url, name: d?.filename || d?.name, size: d?.size };
+        },
+        // 7. BK9
+        async () => {
+          const r = await axios.get(`https://bk9.fun/download/mediafire?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.BK9 || r.data?.data || r.data;
+          const url = d?.download_url || d?.url;
+          if (!url) throw new Error('no url');
+          return { url, name: d?.filename || d?.name, size: d?.size };
+        },
+        // 8. Akuari
+        async () => {
+          const r = await axios.get(`https://api.akuari.my.id/downloader/mediafire?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.result || r.data?.data || r.data;
+          const url = d?.download_url || d?.url;
+          if (!url) throw new Error('no url');
+          return { url, name: d?.filename || d?.name, size: d?.size };
+        },
+        // 9. Ryzendesu
+        async () => {
+          const r = await axios.get(`https://api.ryzendesu.vip/api/downloader/mediafire?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const d = r.data?.data || r.data;
+          const url = d?.download_url || d?.url;
+          if (!url) throw new Error('no url');
+          return { url, name: d?.filename || d?.name, size: d?.size };
+        },
+        // 10. Direct scrape (extract download link from MediaFire page)
+        async () => {
+          const r = await axios.get(q, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 20000,
+          });
+          const html = r?.data || '';
+          const dlMatch = html.match(/href="(https:\/\/download\d*\.mediafire\.com\/[^"]+)"/);
+          if (!dlMatch?.[1]) throw new Error('no direct link found');
+          const nameMatch = html.match(/<div class="filename">([^<]+)<\/div>/);
+          const sizeMatch = html.match(/<div class="file-size">([^<]+)<\/div>/);
+          return {
+            url: dlMatch[1],
+            name: nameMatch?.[1]?.trim() || 'MediaFire_File',
+            size: sizeMatch?.[1]?.trim() || 'Unknown',
+          };
+        },
+      ];
 
-        const { download_url, name, size, fileType } = data.result;
-
-        await m.react('⬆️');
-        await sock.sendMessage(chat, {
-          document: { url: download_url },
-          mimetype: fileType || 'application/octet-stream',
-          fileName: name || 'MediaFire_File',
-          caption: `📦 *MediaFire Download*\n\n📄 *File:* ${name || 'Unknown'}\n💾 *Size:* ${size || 'Unknown'}\n\n${cfg.footer}`,
-        }, { quoted: msg });
-        await m.react('✅');
-      } catch (e) {
-        await m.react('❌');
-        return m.reply(`❌ MediaFire error: ${e.message}\n\n${cfg.footer}`);
+      let mfResult = null;
+      for (const [i, fn] of mfApis.entries()) {
+        try {
+          mfResult = await fn();
+          if (mfResult?.url) { console.log(`[MF DL] method ${i + 1} OK`); break; }
+        } catch (e) { console.log(`[MF DL] method ${i + 1} failed: ${e.message}`); }
       }
+
+      if (!mfResult?.url) {
+        await m.react('❌');
+        return m.reply(`${tr('dl_mediafire_fail')}\n\n${cfg.footer}`);
+      }
+
+      await m.react('⬆️');
+      await sock.sendMessage(chat, {
+        document: { url: mfResult.url },
+        mimetype: mfResult.type || 'application/octet-stream',
+        fileName: mfResult.name || 'MediaFire_File',
+        caption: `📦 *MediaFire Download*\n\n📄 *File:* ${mfResult.name || 'Unknown'}\n💾 *Size:* ${mfResult.size || 'Unknown'}\n\n${cfg.footer}`,
+      }, { quoted: msg });
+      await m.react('✅');
     }
 
     // ── INSTAGRAM ─────────────────────────────────────
@@ -139,32 +230,143 @@ module.exports = {
         });
       }
       await m.react('⏳');
-      try {
-        const res  = await axios.get(`https://www.dark-yasiya-api.site/download/instagram?url=${encodeURIComponent(q)}`, { timeout: 30000 });
-        const data = res.data;
 
-        if (!data?.status || !data?.result) {
-          await m.react('❌');
-          return m.reply(`${tr('dl_insta_fail')}\n\n${cfg.footer}`);
+      // ── Normalize helpers ──────────────────────────────
+      const igExtract = (d) => {
+        if (!d) return null;
+        // Normalize to array of { url, type }
+        const raw = d?.result || d?.data || d?.medias || d;
+        const arr = Array.isArray(raw) ? raw : [raw];
+        const items = [];
+        for (const item of arr) {
+          const url = item?.url || item?.video || item?.image || item?.download_url || item?.src;
+          if (!url || typeof url !== 'string' || !url.startsWith('http')) continue;
+          const isVideo = item?.type === 'video' || item?.media_type === 1 ||
+            url.includes('.mp4') || url.includes('video');
+          items.push({ url, isVideo });
         }
+        return items.length ? items : null;
+      };
 
-        const media = Array.isArray(data.result) ? data.result : [data.result];
-        await m.react('⬆️');
-        for (const item of media.slice(0, 10)) {
-          const url = item?.url || item?.video || item?.image;
-          if (!url) continue;
-          const isVideo = item?.type === 'video' || url.includes('.mp4');
-          if (isVideo) {
-            await sock.sendMessage(chat, { video: { url }, caption: `📸 *Instagram*\n\n${cfg.footer}` }, { quoted: msg });
-          } else {
-            await sock.sendMessage(chat, { image: { url }, caption: `📸 *Instagram*\n\n${cfg.footer}` }, { quoted: msg });
+      // ── 10+ API fallback chain ─────────────────────────
+      const igApis = [
+        // 1. Dark Yasiya
+        async () => {
+          const r = await axios.get(`https://www.dark-yasiya-api.site/download/instagram?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          if (!r.data?.status || !r.data?.result) throw new Error('no result');
+          return igExtract(r.data);
+        },
+        // 2. Siputzx
+        async () => {
+          const r = await axios.get(`https://api.siputzx.my.id/api/d/instagram?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const items = igExtract(r.data?.data || r.data);
+          if (!items) throw new Error('no result');
+          return items;
+        },
+        // 3. Agatz
+        async () => {
+          const r = await axios.get(`https://api.agatz.xyz/api/instagram?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const items = igExtract(r.data?.data || r.data);
+          if (!items) throw new Error('no result');
+          return items;
+        },
+        // 4. Paxsenix
+        async () => {
+          const r = await axios.get(`https://paxsenix.serv00.net/api/instagram?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const items = igExtract(r.data?.result || r.data);
+          if (!items) throw new Error('no result');
+          return items;
+        },
+        // 5. Ndevapi
+        async () => {
+          const r = await axios.get(`https://ndevapi.com/download/instagram?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const items = igExtract(r.data?.data || r.data);
+          if (!items) throw new Error('no result');
+          return items;
+        },
+        // 6. XTeam
+        async () => {
+          const r = await axios.get(`https://api.xteam.xyz/instagram?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const items = igExtract(r.data?.result || r.data);
+          if (!items) throw new Error('no result');
+          return items;
+        },
+        // 7. Ryzendesu
+        async () => {
+          const r = await axios.get(`https://api.ryzendesu.vip/api/downloader/instagram?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const items = igExtract(r.data?.data || r.data);
+          if (!items) throw new Error('no result');
+          return items;
+        },
+        // 8. BK9
+        async () => {
+          const r = await axios.get(`https://bk9.fun/download/instagram?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const items = igExtract(r.data?.BK9 || r.data?.data || r.data);
+          if (!items) throw new Error('no result');
+          return items;
+        },
+        // 9. Akuari
+        async () => {
+          const r = await axios.get(`https://api.akuari.my.id/downloader/instagram?url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const items = igExtract(r.data?.result || r.data?.data || r.data);
+          if (!items) throw new Error('no result');
+          return items;
+        },
+        // 10. Cobalt (video only)
+        async () => {
+          for (const inst of ['https://api.cobalt.tools', 'https://cobalt.oisd.nl', 'https://cobalt.catvibers.me']) {
+            try {
+              const r = await axios.post(`${inst}/`, { url: q, downloadMode: 'auto' }, {
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000,
+              });
+              if (r?.data?.url) return [{ url: r.data.url, isVideo: true }];
+            } catch {}
           }
-        }
-        await m.react('✅');
-      } catch (e) {
-        await m.react('❌');
-        return m.reply(`❌ Instagram error: ${e.message}\n\n${cfg.footer}`);
+          throw new Error('cobalt: all failed');
+        },
+        // 11. Lolhuman
+        async () => {
+          const r = await axios.get(`https://api.lolhuman.xyz/api/instagram?apikey=&url=${encodeURIComponent(q)}`, { timeout: 25000 });
+          const items = igExtract(r.data?.result || r.data);
+          if (!items) throw new Error('no result');
+          return items;
+        },
+        // 12. SaveInsta scrape
+        async () => {
+          const r = await axios.post('https://saveinsta.app/api/ajaxSearch', new URLSearchParams({ q }), {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: 'https://saveinsta.app/' },
+            timeout: 20000,
+          });
+          const urls = [...(r?.data?.data || '').matchAll(/href="(https:\/\/[^"]+\.(?:mp4|jpg|jpeg|png)[^"]*)"/g)]
+            .map(m => m[1]);
+          if (!urls.length) throw new Error('no urls');
+          return urls.map(url => ({ url, isVideo: url.includes('.mp4') }));
+        },
+      ];
+
+      let igMedia = null;
+      for (const [i, fn] of igApis.entries()) {
+        try {
+          igMedia = await fn();
+          if (igMedia?.length) { console.log(`[IG DL] method ${i + 1} OK`); break; }
+        } catch (e) { console.log(`[IG DL] method ${i + 1} failed: ${e.message}`); }
       }
+
+      if (!igMedia?.length) {
+        await m.react('❌');
+        return m.reply(`${tr('dl_insta_fail')}\n\n${cfg.footer}`);
+      }
+
+      await m.react('⬆️');
+      for (const item of igMedia.slice(0, 10)) {
+        if (!item?.url) continue;
+        if (item.isVideo) {
+          await sock.sendMessage(chat, { video: { url: item.url }, caption: `📸 *Instagram*\n\n${cfg.footer}` }, { quoted: msg }).catch(() => {});
+        } else {
+          await sock.sendMessage(chat, { image: { url: item.url }, caption: `📸 *Instagram*\n\n${cfg.footer}` }, { quoted: msg }).catch(() => {});
+        }
+      }
+      await m.react('✅');
     }
 
     // ── FACEBOOK ──────────────────────────────────────
