@@ -1,0 +1,459 @@
+'use strict';
+const express      = require('express');
+const http         = require('http');
+const { Server }   = require('socket.io');
+const session      = require('express-session');
+const MongoStore   = require('connect-mongo');
+const helmet       = require('helmet');
+const compression  = require('compression');
+const cors         = require('cors');
+const path         = require('path');
+const fs           = require('fs');
+const cfg          = require('../config');
+const db           = require('../src/commands/index');
+const logger       = require('../src/commands/logger');
+
+const app    = express();
+const server = http.createServer(app);
+const io     = new Server(server, { cors: { origin: '*', methods: ['GET','POST'] } });
+
+let _sm = null; // sessionManager
+
+// ── Persistent blocked numbers ────────────────────────────────
+const BLOCKED_FILE = path.join(__dirname, '../data/blocked.json');
+function loadBlocked() {
+  try { return new Set(JSON.parse(fs.readFileSync(BLOCKED_FILE, 'utf8'))); }
+  catch { return new Set(); }
+}
+function saveBlocked(set) {
+  fs.writeFileSync(BLOCKED_FILE, JSON.stringify([...set]), 'utf8');
+}
+const blockedNumbers = loadBlocked();
+
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(compression());
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// ── Session middleware FIRST (before all routes) ──────────────
+app.use(session({
+  secret:            cfg.dashSecret,
+  resave:            false,
+  saveUninitialized: false,
+  store: MongoStore.create({ mongoUrl: cfg.mongoUri }),
+  cookie: { maxAge: 8 * 60 * 60 * 1000 },
+}));
+
+// ── Serve index.html only if authenticated ────────────────────
+app.get('/', (req, res) => {
+  if (!req.session?.authenticated) return res.redirect('/login.html');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ── Block direct /index.html access ──────────────────────────
+app.get('/index.html', (req, res) => {
+  if (!req.session?.authenticated) return res.redirect('/login.html');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ── Auth check endpoint ───────────────────────────────────────
+app.get('/api/auth/check', (req, res) => {
+  res.json({ authenticated: !!req.session?.authenticated });
+});
+
+// ── Static files (after auth routes) ─────────────────────────
+app.use(express.static(path.join(__dirname, 'public')));
+
+function requireAuth(req, res, next) {
+  if (req.session?.authenticated) return next();
+  res.status(401).json({ error: 'Unauthorized' });
+}
+
+// ── Auth ──────────────────────────────────────────────────────
+app.post('/login', (req, res) => {
+  if (req.body.password === cfg.dashPassword) {
+    req.session.authenticated = true;
+    return res.json({ ok: true });
+  }
+  res.status(401).json({ ok: false, error: 'Wrong password' });
+});
+app.post('/logout', (req, res) => { req.session.destroy(); res.json({ ok: true }); });
+app.get('/logout',  (req, res) => { req.session.destroy(() => res.redirect('/login.html')); });
+
+// ── PAIR: Submit number → get pair code ───────────────────────
+app.post('/api/pair', async (req, res) => {
+  const userId = (req.body.number || '').replace(/[^0-9]/g, '');
+  if (userId.length < 7) return res.status(400).json({ ok: false, error: 'Invalid number' });
+  if (!_sm) return res.status(503).json({ ok: false, error: 'Server not ready' });
+
+  // ── Block check: blocked numbers cannot pair ──────────────
+  if (blockedNumbers.has(userId)) {
+    return res.status(403).json({ ok: false, blocked: true, error: 'This number has been blocked by admin.' });
+  }
+
+  const existing = _sm.getSession(userId);
+  if (existing?.status === 'connected') {
+    return res.json({ ok: true, status: 'already_connected', number: userId });
+  }
+
+  try {
+    const sess = await _sm.startSession(userId, (uid, update) => {
+      io.emit('session_update', { userId: uid, ...update });
+    });
+
+    let waited = 0;
+    while (!sess.pairCode && sess.status !== 'connected' && sess.status !== 'error' && waited < 60000) {
+      await new Promise(r => setTimeout(r, 500));
+      waited += 500;
+    }
+
+    if (sess.status === 'error') {
+      return res.status(500).json({ ok: false, error: 'Session error. Please try again.' });
+    }
+
+    if (sess.status === 'connected') return res.json({ ok: true, status: 'already_connected', number: userId });
+    if (sess.pairCode)               return res.json({ ok: true, status: 'pairing', pairCode: sess.pairCode, number: userId });
+    return res.status(504).json({ ok: false, error: 'Pair code timeout. Try again.' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── PAIR: Poll session status ─────────────────────────────────
+app.get('/api/pair/status/:number', (req, res) => {
+  if (!_sm) return res.status(503).json({ ok: false });
+  const userId = req.params.number.replace(/[^0-9]/g, '');
+  const sess   = _sm.getSession(userId);
+  if (!sess) return res.json({ ok: true, status: 'not_started' });
+  res.json({ ok: true, status: sess.status, pairCode: sess.pairCode, connectedAt: sess.connectedAt, number: userId });
+});
+
+// ── Disconnect a session ──────────────────────────────────────
+app.delete('/api/sessions/:userId', requireAuth, async (req, res) => {
+  if (!_sm) return res.status(503).json({ ok: false });
+  await _sm.clearUserSession(req.params.userId);
+  res.json({ ok: true });
+});
+
+// ── Block a session (stop + persist to file, prevent re-pair) ─
+app.post('/api/sessions/:userId/block', requireAuth, async (req, res) => {
+  if (!_sm) return res.status(503).json({ ok: false });
+  const userId = req.params.userId;
+  await _sm.stopSession(userId);   // stop memory session, DB auth kept intact
+  blockedNumbers.add(userId);
+  saveBlocked(blockedNumbers);     // persist to file
+  res.json({ success: true });
+});
+
+// ── Unblock: remove block + auto reconnect using existing auth ─
+app.post('/api/sessions/:userId/unblock', requireAuth, async (req, res) => {
+  if (!_sm) return res.status(503).json({ ok: false });
+  const userId = req.params.userId;
+  blockedNumbers.delete(userId);
+  saveBlocked(blockedNumbers);     // persist to file
+  try {
+    // startSession uses existing DB auth — no re-pair needed
+    await _sm.startSession(userId, (uid, update) => {
+      io.emit('session_update', { userId: uid, ...update });
+    });
+    res.json({ success: true });
+  } catch (e) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
+// ── Stop a session (keep auth, allow manual restart) ──────────
+app.post('/api/sessions/:userId/stop', requireAuth, async (req, res) => {
+  if (!_sm) return res.status(503).json({ ok: false });
+  await _sm.stopSession(req.params.userId);  // auth data kept in DB
+  res.json({ success: true });
+});
+
+// ── Restart a session using existing DB auth ──────────────────
+app.post('/api/sessions/:userId/restart', requireAuth, async (req, res) => {
+  if (!_sm) return res.status(503).json({ ok: false });
+  const userId = req.params.userId;
+  await _sm.stopSession(userId);
+  try {
+    await _sm.startSession(userId, (uid, update) => {
+      io.emit('session_update', { userId: uid, ...update });
+    });
+    res.json({ success: true });
+  } catch (e) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
+// ── Remove a session (stop + delete auth from DB) ────────────
+app.post('/api/sessions/:userId/remove', requireAuth, async (req, res) => {
+  if (!_sm) return res.status(503).json({ ok: false });
+  const userId = req.params.userId;
+  blockedNumbers.delete(userId);
+  saveBlocked(blockedNumbers);
+  await _sm.clearUserSession(userId).catch(() => {});
+  res.json({ success: true });
+});
+
+// ── Admin stats ───────────────────────────────────────────────
+app.get('/api/status', requireAuth, async (req, res) => {
+  const sessions  = _sm?.getAllSessions() || [];
+  const connected = sessions.filter(s => s.status === 'connected').length;
+  const users     = await db.User.countDocuments().catch(() => 0);
+  const groups    = await db.Group.countDocuments().catch(() => 0);
+  res.json({ sessions: { total: sessions.length, connected }, users, groups, uptime: process.uptime(), memory: process.memoryUsage().rss });
+});
+
+app.get('/api/sessions', requireAuth, async (req, res) => {
+  // Active sessions (in memory)
+  const active = (_sm?.getAllSessions() || []).map(s => ({
+    ...s,
+    isBlocked: blockedNumbers.has(s.userId),
+    isStopped: false,
+  }));
+
+  // Find sessions in DB that are NOT in memory (stopped/blocked)
+  try {
+    const mongoose = require('mongoose');
+    const UserAuthState = mongoose.model('UserAuthState');
+    const docs = await UserAuthState.find({ key: 'creds' }).lean();
+    const activeIds = new Set(active.map(s => s.userId));
+    const inactive = docs
+      .map(d => d._id.split(':')[0])
+      .filter(uid => !activeIds.has(uid))
+      .map(uid => ({
+        userId: uid,
+        number: uid,
+        status: blockedNumbers.has(uid) ? 'blocked' : 'stopped',
+        isBlocked: blockedNumbers.has(uid),
+        isStopped: true,
+        connectedAt: null,
+        name: '',
+      }));
+
+    // Also include blocked numbers that have NO auth state in DB
+    // (numbers blocked before ever pairing, or after auth was cleared)
+    const knownIds = new Set([...activeIds, ...inactive.map(s => s.userId)]);
+    const blockedOnly = [...blockedNumbers]
+      .filter(uid => !knownIds.has(uid))
+      .map(uid => ({
+        userId: uid,
+        number: uid,
+        status: 'blocked',
+        isBlocked: true,
+        isStopped: true,
+        connectedAt: null,
+        name: '',
+      }));
+
+    res.json({ sessions: [...active, ...inactive, ...blockedOnly] });
+  } catch {
+    res.json({ sessions: active });
+  }
+});
+
+app.get('/api/stats', requireAuth, async (req, res) => {
+  const stats  = await db.getStats(7).catch(() => []);
+  const users  = await db.User.countDocuments().catch(() => 0);
+  const groups = await db.Group.countDocuments().catch(() => 0);
+  res.json({ stats, users, groups });
+});
+
+app.get('/api/users', requireAuth, async (req, res) => {
+  const users = await db.User.find().sort({ totalCommands: -1 }).limit(100).lean().catch(() => []);
+  res.json({ users });
+});
+
+app.get('/api/groups', requireAuth, async (req, res) => {
+  const groups = await db.Group.find().sort({ createdAt: -1 }).limit(100).lean().catch(() => []);
+  res.json({ groups });
+});
+
+// ── Per-user BotConfig: GET settings ─────────────────────────
+app.get('/api/pair/settings/:number', async (req, res) => {
+  const userId = req.params.number.replace(/[^0-9]/g, '');
+  if (!userId) return res.status(400).json({ ok: false, error: 'Invalid number' });
+  try {
+    const botCfg = await db.getBotConfig(userId);
+    const { CMD_GROUPS } = require('../src/commands/settings');
+    const { ALWAYS_ON_CMDS } = require('../src/commands/index');
+    const enabledMap = botCfg.enabledCommands || new Map();
+
+    const groups = {};
+    for (const [cat, cmds] of Object.entries(CMD_GROUPS)) {
+      groups[cat] = cmds
+        .filter(c => !ALWAYS_ON_CMDS.has(c))
+        .map(c => {
+          const val = enabledMap.get(c);
+          return { cmd: c, enabled: val === undefined ? true : !!val };
+        });
+    }
+
+    res.json({
+      ok: true,
+      mode: botCfg.mode || 'public',
+      maintenance: !!botCfg.maintenance,
+      features: botCfg.features || {},
+      groups,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── Per-user BotConfig: SAVE settings + restart that session ─
+app.post('/api/pair/settings/:number', async (req, res) => {
+  const userId = req.params.number.replace(/[^0-9]/g, '');
+  if (!userId) return res.status(400).json({ ok: false, error: 'Invalid number' });
+  const { commands, features, mode, maintenance } = req.body;
+  try {
+    const botCfg = await db.getBotConfig(userId);
+
+    // Update mode
+    if (mode) botCfg.mode = mode;
+
+    // Update maintenance
+    if (typeof maintenance === 'boolean') botCfg.maintenance = maintenance;
+
+    // Update features
+    if (features && typeof features === 'object') {
+      for (const [k, v] of Object.entries(features)) {
+        if (typeof v === 'boolean') botCfg.features[k] = v;
+      }
+      botCfg.markModified('features');
+    }
+
+    // Update per-command toggles
+    if (commands && typeof commands === 'object') {
+      if (!botCfg.enabledCommands) botCfg.enabledCommands = new Map();
+      for (const [cmd, val] of Object.entries(commands)) {
+        botCfg.enabledCommands.set(cmd, !!val);
+      }
+      botCfg.markModified('enabledCommands');
+    }
+
+    await botCfg.save();
+
+    // Restart ONLY this user's session (not others)
+    if (_sm) {
+      await _sm.stopSession(userId);
+      try {
+        await _sm.startSession(userId, (uid, update) => {
+          io.emit('session_update', { userId: uid, ...update });
+        });
+      } catch (e) {
+        logger.warn(`[SETTINGS] Restart failed for ${userId}: ${e.message}`);
+      }
+    }
+
+    res.json({ ok: true, restarted: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── Public stats (no auth) ───────────────────────────────────
+app.get('/api/pair/stats', async (req, res) => {
+  const sessions  = _sm?.getAllSessions() || [];
+  const connected = sessions.filter(s => s.status === 'connected').length;
+  const users     = await db.User.countDocuments().catch(() => 0);
+  const groups    = await db.Group.countDocuments().catch(() => 0);
+  res.json({ connected, users, groups });
+});
+
+// ── Serve pair page ───────────────────────────────────────────
+app.get('/pair', (req, res) => {
+  res.sendFile(require('path').join(__dirname, 'public', 'pair.html'));
+});
+
+
+// ── Broadcast ─────────────────────────────────────────────────
+// type: 'all' | 'groups' | 'private' | 'connected'
+app.post('/api/broadcast', requireAuth, async (req, res) => {
+  try {
+    const { message, type = 'all' } = req.body;
+    if (!message) return res.json({ error: 'No message' });
+    if (!_sm)     return res.json({ error: 'Bot not ready' });
+
+    const text = ('📢 *Broadcast*\n\n' + message + '\n\n' + (cfg.footer || '')).trim();
+
+    // ── NEW: Connected Numbers Only ────────────────────────────
+    // Sends to each connected bot's OWN inbox (self-message)
+    // Only the owner of that number can read it — nobody else sees it
+    if (type === 'connected') {
+      const allSessions = _sm.getAllSessions();
+      const connectedSessions = allSessions.filter(s => s.status === 'connected');
+      if (!connectedSessions.length) return res.json({ error: 'No connected numbers' });
+
+      let sent = 0, failed = 0;
+      for (const s of connectedSessions) {
+        const sess = _sm.getSession(s.userId);
+        const sock = sess?.sock;
+        if (!sock) { failed++; continue; }
+        // Send to self — bot's own number inbox
+        const selfJid = s.userId.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+        try {
+          await sock.sendMessage(selfJid, { text });
+          sent++;
+        } catch { failed++; }
+        await new Promise(r => setTimeout(r, 500));
+      }
+      return res.json({ success: true, sent, failed, total: connectedSessions.length });
+    }
+
+    // ── Existing: all / groups / private ──────────────────────
+    const allSessions = _sm.getAllSessions();
+    const activeSess  = allSessions.find(s => s.status === 'connected');
+    if (!activeSess)  return res.json({ error: 'No connected number' });
+
+    const sess = _sm.getSession(activeSess.userId);
+    const sock = sess?.sock;
+    if (!sock)        return res.json({ error: 'Socket not available' });
+
+    const knownJids = sock._chatJids ? [...sock._chatJids] : [];
+    let groupJids = new Set();
+    try {
+      const groups = await sock.groupFetchAllParticipating();
+      for (const jid of Object.keys(groups || {})) groupJids.add(jid);
+    } catch {}
+
+    const allJids = new Set([...knownJids, ...groupJids]);
+    let targets = [];
+    for (const jid of allJids) {
+      if (!jid || jid === 'status@broadcast') continue;
+      const isGroup   = jid.endsWith('@g.us');
+      const isPrivate = jid.endsWith('@s.whatsapp.net');
+      if (type === 'groups'  && !isGroup)   continue;
+      if (type === 'private' && !isPrivate) continue;
+      targets.push(jid);
+    }
+
+    let sent = 0, failed = 0;
+    for (const jid of targets) {
+      try {
+        await sock.sendMessage(jid, { text });
+        sent++;
+      } catch { failed++; }
+      await new Promise(r => setTimeout(r, 900));
+    }
+
+    res.json({ success: true, sent, failed, total: targets.length });
+  } catch (e) {
+    res.json({ error: e.message });
+  }
+});
+
+// ── socket.io ────────────────────────────────────────────────
+io.on('connection', (socket) => {
+  if (_sm) socket.emit('sessions_snapshot', _sm.getAllSessions());
+  socket.on('disconnect', () => {});
+});
+
+// ── Start ─────────────────────────────────────────────────────
+function startDashboard(sessionManager) {
+  _sm = sessionManager;
+  const port = cfg.dashPort || 3000;
+  server.listen(port, () => logger.success('[DASHBOARD] Running on port ' + port));
+}
+
+module.exports = { startDashboard };
