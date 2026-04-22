@@ -147,7 +147,7 @@ module.exports = {
     antiCall:           process.env.ENABLE_ANTI_CALL          === 'true',
     autoRead:           process.env.ENABLE_AUTO_READ          === 'true',
 
-    // ── Lara auto features ──────────────────────────────────
+    // ── Unity auto features ──────────────────────────────────
     autoReact:          process.env.ENABLE_AUTO_REACT          === 'true',
     autoReactEmojis:    (process.env.AUTO_REACT_EMOJIS         || '❤️,🩷,🧡,💛,💚,🩵,💙,💜').split(','),
     autoPresence:       process.env.ENABLE_AUTO_PRESENCE       === 'true',
