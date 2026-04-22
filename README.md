@@ -14,7 +14,7 @@
 <img src="./src/media/unity_thumb.jpg" alt="UNITY-MD" width="500" style="border-radius:50%"/>
 
 > **WhatsApp MD Bot — Built for UNITY TEAM**
-> 350+ commands | MongoDB | Dashboard | Sri Lanka focused
+> 660+ commands | MongoDB | Dashboard | Sri Lanka focused
 
 </div>
 
