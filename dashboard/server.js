@@ -369,55 +369,60 @@ app.get('/pair', (req, res) => {
 
 // ── Broadcast ─────────────────────────────────────────────────
 // type: 'all' | 'groups' | 'private' | 'connected'
+//
+// ALL sessions run in PARALLEL simultaneously.
+// Within each session messages are sent sequentially with delay.
+// HTTP responds immediately — real-time progress via socket.io:
+//   broadcast_progress { jobId, userId, sent, failed, total, done }
+//   broadcast_done     { jobId, totalSent, totalFailed, sessions }
+//
 app.post('/api/broadcast', requireAuth, async (req, res) => {
   try {
     const { message, type = 'all' } = req.body;
     if (!message) return res.json({ error: 'No message' });
     if (!_sm)     return res.json({ error: 'Bot not ready' });
 
-    const text = ('📢 *Broadcast*\n\n' + message + '\n\n' + (cfg.footer || '')).trim();
+    const allSessions       = _sm.getAllSessions();
+    const connectedSessions = allSessions.filter(s => s.status === 'connected');
+    if (!connectedSessions.length) return res.json({ error: 'No connected numbers' });
 
-    // ── NEW: Connected Numbers Only ────────────────────────────
-    // Sends to each connected bot's OWN inbox (self-message)
-    // Only the owner of that number can read it — nobody else sees it
-    if (type === 'connected') {
-      const allSessions = _sm.getAllSessions();
-      const connectedSessions = allSessions.filter(s => s.status === 'connected');
-      if (!connectedSessions.length) return res.json({ error: 'No connected numbers' });
+    const text  = ('📢 *Broadcast*\n\n' + message + '\n\n' + (cfg.footer || '')).trim();
+    const jobId = Date.now().toString(36);
 
-      let sent = 0, failed = 0;
-      for (const s of connectedSessions) {
-        const sess = _sm.getSession(s.userId);
-        const sock = sess?.sock;
-        if (!sock) { failed++; continue; }
-        // Send to self — bot's own number inbox
-        const selfJid = s.userId.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
-        try {
-          await sock.sendMessage(selfJid, { text });
-          sent++;
-        } catch { failed++; }
-        await new Promise(r => setTimeout(r, 500));
-      }
-      return res.json({ success: true, sent, failed, total: connectedSessions.length });
-    }
+    // ── Respond immediately so HTTP never times out ────────────
+    res.json({ success: true, jobId, sessions: connectedSessions.length, status: 'broadcasting' });
 
-    // ── Existing: all / groups / private ──────────────────────
-    // BUG FIX: iterate ALL connected sessions — not just the first one.
-    // Each bot sends from its OWN socket to ITS OWN chat list.
-    const allSessions = _sm.getAllSessions();
-    const connectedAll = allSessions.filter(s => s.status === 'connected');
-    if (!connectedAll.length) return res.json({ error: 'No connected number' });
+    // ── Run ALL sessions in parallel (background) ──────────────
+    let totalSent = 0, totalFailed = 0;
+    const sessionResults = [];
 
-    let sent = 0, failed = 0;
-
-    for (const activeS of connectedAll) {
+    await Promise.allSettled(connectedSessions.map(async (activeS) => {
       const sess = _sm.getSession(activeS.userId);
       const sock = sess?.sock;
-      if (!sock) continue;
+      if (!sock) {
+        sessionResults.push({ userId: activeS.userId, sent: 0, failed: 0, targets: 0 });
+        return;
+      }
 
-      // Collect this session's known JIDs
+      // ── "connected" type: send only to own inbox ──────────
+      if (type === 'connected') {
+        const selfJid = activeS.userId.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+        try {
+          await sock.sendMessage(selfJid, { text });
+          totalSent++;
+          io.emit('broadcast_progress', { jobId, userId: activeS.userId, sent: 1, failed: 0, total: 1, done: true });
+          sessionResults.push({ userId: activeS.userId, sent: 1, failed: 0, targets: 1 });
+        } catch {
+          totalFailed++;
+          io.emit('broadcast_progress', { jobId, userId: activeS.userId, sent: 0, failed: 1, total: 1, done: true });
+          sessionResults.push({ userId: activeS.userId, sent: 0, failed: 1, targets: 1 });
+        }
+        return;
+      }
+
+      // ── all / groups / private: build this session's JID list ─
       const knownJids = sock._chatJids ? [...sock._chatJids] : [];
-      let groupJids = new Set();
+      const groupJids = new Set();
       try {
         const groups = await sock.groupFetchAllParticipating();
         for (const jid of Object.keys(groups || {})) groupJids.add(jid);
@@ -434,16 +439,35 @@ app.post('/api/broadcast', requireAuth, async (req, res) => {
         targets.push(jid);
       }
 
+      let sSent = 0, sFailed = 0;
       for (const jid of targets) {
         try {
           await sock.sendMessage(jid, { text });
-          sent++;
-        } catch { failed++; }
-        await new Promise(r => setTimeout(r, 900));
+          sSent++;   totalSent++;
+        } catch {
+          sFailed++; totalFailed++;
+        }
+        // Emit live progress every 5 messages
+        if ((sSent + sFailed) % 5 === 0) {
+          io.emit('broadcast_progress', {
+            jobId, userId: activeS.userId,
+            sent: sSent, failed: sFailed, total: targets.length, done: false,
+          });
+        }
+        await new Promise(r => setTimeout(r, 400));
       }
-    } // end per-session loop
 
-    res.json({ success: true, sent, failed, total: sent + failed });
+      io.emit('broadcast_progress', {
+        jobId, userId: activeS.userId,
+        sent: sSent, failed: sFailed, total: targets.length, done: true,
+      });
+      sessionResults.push({ userId: activeS.userId, sent: sSent, failed: sFailed, targets: targets.length });
+    }));
+
+    // ── All sessions finished ──────────────────────────────────
+    io.emit('broadcast_done', { jobId, totalSent, totalFailed, sessions: sessionResults });
+    logger.info(`[BROADCAST] job=${jobId} type=${type} sent=${totalSent} failed=${totalFailed}`);
+
   } catch (e) {
     res.json({ error: e.message });
   }
