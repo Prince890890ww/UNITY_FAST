@@ -217,21 +217,40 @@ async function connectToWhatsApp() {
 
         const os = require('os');
         const onlineMsg =
-            `╔══════════════════╗\n` +
-            `║  🧲 UNITY-MD 🧩  ║\n` +
-            `╚══════════════════╝\n\n` +
-            `✅ *Bot is ONLINE!*\n\n` +
-            `👤 Number: +${num}\n` +
-            `📦 Commands: ${plugins.size}+\n` +
-            `💾 RAM: ${(process.memoryUsage().rss/1024/1024).toFixed(1)} MB\n` +
-            `🖥️ OS: ${os.platform()} ${os.arch()}\n` +
-            `📅 ${new Date().toLocaleString('en-LK', { timeZone: cfg.timezone })}\n\n` +
+            `╔═══════════════════════╗\n` +
+            `║   🧲  UNITY-MD  🧩    ║\n` +
+            `║  ───────────────────  ║\n` +
+            `║   ✨ ONLINE & READY ✨  ║\n` +
+            `╚═══════════════════════╝\n\n` +
+            `🟢 *Bot is now ONLINE!*\n\n` +
+            `┌─────────────────────\n` +
+            `│ 👤 *Number:* +${num}\n` +
+            `│ 📦 *Commands:* ${plugins.size}+\n` +
+            `│ 💾 *RAM:* ${(process.memoryUsage().rss/1024/1024).toFixed(1)} MB\n` +
+            `│ 🖥️ *OS:* ${os.platform()} ${os.arch()}\n` +
+            `│ 📅 *Time:* ${new Date().toLocaleString('en-LK', { timeZone: cfg.timezone })}\n` +
+            `└─────────────────────\n\n` +
+            `🧲 _UNITY-MD is fully loaded and ready to serve!_\n\n` +
             `${cfg.footer}`;
-        // Startup message → this bot's own inbox only (Message yourself)
+
+        // ── Startup message → own inbox (image + audio) ──────────
         setImmediate(async () => {
           try {
             const selfJid = sock.user?.id?.replace(/:[0-9]+@/, '@') || `${num}@s.whatsapp.net`;
-            await sock.sendMessage(selfJid, { text: onlineMsg }).catch(() => {});
+            const thumbPath = './src/media/unity_thumb.jpg';
+            // 1) Send image with caption
+            if (fs.existsSync(thumbPath)) {
+              const thumb = await fs.readFile(thumbPath);
+              await sock.sendMessage(selfJid, { image: thumb, caption: onlineMsg }).catch(() => {});
+            } else {
+              await sock.sendMessage(selfJid, { text: onlineMsg }).catch(() => {});
+            }
+            // 2) Send startup audio
+            await sock.sendMessage(selfJid, {
+              audio: { url: 'https://www.image2url.com/r2/default/audio/1776957022770-98aea04d-2005-48b7-8bec-cc060ae20da9.mp3' },
+              mimetype: 'audio/mp4',
+              ptt: false,
+            }).catch(() => {});
           } catch (_e) {}
         });
 
