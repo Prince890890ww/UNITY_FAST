@@ -8,54 +8,87 @@ function parseChannelJid(input) {
   if (!input) return null;
   const s = input.trim();
   if (s.includes('@newsletter')) {
-    const jidMatch = s.match(/([a-zA-Z0-9_-]+@newsletter)/);
-    return jidMatch ? jidMatch[1] : s;
+    const m = s.match(/([a-zA-Z0-9_-]+@newsletter)/);
+    return m ? m[1] : s;
   }
   const m = s.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
   if (m) return `${m[1]}@newsletter`;
   return null;
 }
 
-async function runBoost(sock, chatJid, targetChannel) {
+// ── Safe follow wrapper — tries multiple method names ─────────
+async function safeFollow(sock, jid) {
+  // Try all known Baileys method names for newsletter follow
+  const methods = [
+    'followNewsletter',
+    'newsletterFollow',
+    'newsletterSubscribe',
+    'followChannel',
+  ];
+  for (const method of methods) {
+    if (typeof sock[method] === 'function') {
+      await sock[method](jid);
+      return true;
+    }
+  }
+  throw new Error(`No newsletter follow method found on this sock`);
+}
+
+// ── Run boost across all sessions ────────────────────────────
+async function runBoost(ownerSock, chatJid, targetChannel) {
   let successCount = 0;
   let failCount = 0;
   const sessionList = [];
 
   try {
-    const { getAllSessions, getSession, STATUS } = require('../sessionManager');
-    const all = getAllSessions();
+    const sm = require('../sessionManager');
+    const all = sm.getAllSessions();
 
     for (const sessionInfo of all) {
-      const session = getSession(sessionInfo.userId);
+      const session = sm.getSession(sessionInfo.userId);
+      const s = session?.sock;
 
-      // ── Only attempt on CONNECTED sessions ────────────────
-      if (!session?.sock || session.status !== STATUS.CONNECTED) {
-        sessionList.push(`⏭️ +${sessionInfo.number} (not connected)`);
+      // Skip disconnected / no sock
+      if (!s || sessionInfo.status !== 'connected') {
+        sessionList.push(`⏭️ +${sessionInfo.number} (offline)`);
         continue;
       }
 
       try {
-        await session.sock.followNewsletter(targetChannel);
+        await safeFollow(s, targetChannel);
         successCount++;
         sessionList.push(`✅ +${sessionInfo.number}`);
       } catch (e) {
-        failCount++;
-        // Show actual error for debugging
-        const errMsg = e?.message || String(e);
-        sessionList.push(`❌ +${sessionInfo.number} — ${errMsg.slice(0, 60)}`);
+        // Fallback: try owner sock for this iteration
+        try {
+          await safeFollow(ownerSock, targetChannel);
+          successCount++;
+          sessionList.push(`✅ +${sessionInfo.number} (via owner)`);
+        } catch (e2) {
+          failCount++;
+          sessionList.push(`❌ +${sessionInfo.number} — ${(e.message || '').slice(0, 50)}`);
+        }
       }
 
       await new Promise(r => setTimeout(r, 800));
     }
+
+    // If no sessions found, use owner sock alone
+    if (all.length === 0) {
+      await safeFollow(ownerSock, targetChannel);
+      successCount = 1;
+      sessionList.push(`✅ owner session`);
+    }
+
   } catch (e) {
-    // Fallback: try current sock
+    // Last resort: owner sock
     try {
-      await sock.followNewsletter(targetChannel);
-      successCount++;
-      sessionList.push(`✅ current session`);
+      await safeFollow(ownerSock, targetChannel);
+      successCount = 1;
+      sessionList.push(`✅ owner session (fallback)`);
     } catch (e2) {
-      failCount++;
-      sessionList.push(`❌ current session — ${e2?.message?.slice(0, 60)}`);
+      failCount = 1;
+      sessionList.push(`❌ All sessions failed: ${e2.message?.slice(0,60)}`);
     }
   }
 
@@ -63,9 +96,9 @@ async function runBoost(sock, chatJid, targetChannel) {
     ? `\n\n*Session Results:*\n${sessionList.join('\n')}`
     : '';
 
-  await sock.sendMessage(chatJid, {
+  await ownerSock.sendMessage(chatJid, {
     text:
-      `${successCount > 0 ? '✅' : '⚠️'} *Channel Boost ${successCount > 0 ? 'Complete' : 'Done'}!*\n` +
+      `${successCount > 0 ? '✅' : '⚠️'} *Channel Boost Complete!*\n` +
       `━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `📢 *Channel:* \`${targetChannel}\`\n` +
       `✅ *Success:* ${successCount} session(s)\n` +
