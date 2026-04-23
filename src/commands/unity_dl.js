@@ -2615,7 +2615,7 @@ module.exports = {
     // Info
     'cinfo', 'screenshot', 'ss', 'privacy',
     // Fun/image
-    'hack', 'oogway', 'tweet', 'ytcomment', 'jail', 'triggered', 'namecard',
+    'oogway', 'tweet', 'ytcomment', 'jail', 'triggered', 'namecard',
     'character', 'goodnight', 'roseday', 'shayari', 'its-so-stupid', 'comrade',
     // Media
     'blur', 'simage',

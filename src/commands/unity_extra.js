@@ -708,7 +708,7 @@ const OVERLAY_CMDS = ['heart', 'circle', 'lgbt', 'horny', 'lolice', 'gay', 'glas
 module.exports = {
   commands: [
     'cinfo', 'screenshot', 'ss', 'privacy',
-    'hack', 'oogway', 'tweet', 'ytcomment', 'jail', 'triggered', 'namecard',
+    'oogway', 'tweet', 'ytcomment', 'jail', 'triggered', 'namecard',
     'character', 'goodnight', 'roseday', 'shayari', 'its-so-stupid', 'comrade',
     'blur', 'simage',
     'gpt', 'llama3', 'chatai', 'imagine', 'flux', 'sora',
