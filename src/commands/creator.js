@@ -248,9 +248,31 @@ module.exports = {
 
     // ── Restart ───────────────────────────────────────────────
     if (cmd === 'restart') {
-      await m.reply(`🔄 *UNITY-MD restarting...*\n\n${cfg.footer}`);
+      const fs = require('fs-extra');
+      const os = require('os');
+      const restartMsg =
+        `╔═══════════════════════╗\n` +
+        `║   🔄  UNITY-MD  🧩    ║\n` +
+        `║  ───────────────────  ║\n` +
+        `║  ♻️  RESTARTING BOT ♻️  ║\n` +
+        `╚═══════════════════════╝\n\n` +
+        `🟡 *Bot is restarting...*\n\n` +
+        `┌─────────────────────\n` +
+        `│ 💾 *RAM:* ${(process.memoryUsage().rss/1024/1024).toFixed(1)} MB\n` +
+        `│ 🖥️ *OS:* ${os.platform()} ${os.arch()}\n` +
+        `│ 📅 *Time:* ${new Date().toLocaleString('en-LK', { timeZone: cfg.timezone })}\n` +
+        `└─────────────────────\n\n` +
+        `⚡ _Back online in a few seconds!_\n\n` +
+        `${cfg.footer}`;
+      const thumbPath = './src/media/unity_thumb.jpg';
+      if (fs.existsSync(thumbPath)) {
+        const thumb = await fs.readFile(thumbPath);
+        await m.sock.sendMessage(m.jid, { image: thumb, caption: restartMsg }, { quoted: m.msg }).catch(() => {});
+      } else {
+        await m.reply(restartMsg);
+      }
       logger.warn('[CREATOR] Restart command executed');
-      process.exit(1);
+      setTimeout(() => process.exit(1), 1500);
     }
   },
 };
