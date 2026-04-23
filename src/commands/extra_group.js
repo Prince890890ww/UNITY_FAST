@@ -538,6 +538,7 @@ module.exports = {
 
     // ── KICKME / LEAVE GROUP ──────────────────────────────────
     if (cmd === 'kickme' || cmd === 'leavegroup') {
+      if (!m.isOwner) return;
       if (!isBotAdmin) return m.reply(`${tr('err_need_admin')}\n\n${cfg.footer}`);
       try {
         await sock.sendMessage(chat, { text: `👋 Goodbye everyone!\n\n${cfg.footer}` });
