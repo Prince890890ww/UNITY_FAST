@@ -97,6 +97,21 @@ app.post('/api/pair', async (req, res) => {
     return res.json({ ok: true, status: 'already_connected', number: userId });
   }
 
+  // ── Clear any stale DB creds before pairing ───────────────────────────
+  // If a previous session left creds in MongoDB, Baileys loads them and
+  // opens as 'registered' — the !!qr event never fires, so requestPairingCode
+  // is never called and the user sees a permanent timeout.
+  // Clearing first guarantees a fresh unauthenticated socket that WILL
+  // emit !!qr and allow pairing.
+  if (!existing) {
+    const { UserAuthState } = require('./src/sessionManager');
+    const hasCreds = await UserAuthState.findById(userId + ':creds').lean().catch(() => null);
+    if (hasCreds) {
+      logger.info('[PAIR] Stale creds found for ' + userId + ' — clearing before re-pair');
+      await _sm.clearUserSession(userId).catch(() => {});
+    }
+  }
+
   try {
     await _sm.startSession(userId, (uid, update) => {
       io.emit('session_update', { userId: uid, ...update });
