@@ -455,14 +455,18 @@ async function startSession(userId, onUpdate) {
                     `╔══════════════════════════╗\n` +
                     `║  🔐  *DASHBOARD PASSWORD*  🔐  ║\n` +
                     `╚══════════════════════════╝\n\n` +
-                    `🌐 *Bot Settings Website Password:*\n\n` +
+                    `🌐 *Bot Settings Password:*\n\n` +
                     `🔑  *${botCfg.sessionPassword}*\n\n` +
-                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                    `📌 Pair site එකෙ *Configure Bot Settings*\n` +
-                    `   button click කරාම මේ password ඕන වෙනවා.\n\n` +
-                    `⚠️ *මේ password කාටවත් දෙන්න එපා!*\n` +
-                    `   ඒ කෙනාට ඔයාගෙ bot settings වෙනස්\n` +
-                    `   කරන්න පුළුවන් වෙනවා.\n\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+                    `🇬🇧 *English:*\n` +
+                    `Use this password on the pair site when clicking *Configure Bot Settings*.\n` +
+                    `⚠️ Keep this *private* — anyone with it can change your bot settings!\n\n` +
+                    `🇱🇰 *සිංහල:*\n` +
+                    `Pair site එකෙ *Configure Bot Settings* click කරාම මේ password ඕන.\n` +
+                    `⚠️ මේ password *කාටවත් දෙන්න එපා!* ඒ කෙනාට ඔයාගෙ bot settings වෙනස් කරන්න පුළුවන්.\n\n` +
+                    `🇱🇰 *தமிழ்:*\n` +
+                    `Pair site-ல் *Configure Bot Settings* click செய்யும்போது இந்த password தேவை.\n` +
+                    `⚠️ இந்த password-ஐ *யாரிடமும் கொடுக்காதே!* அவர்கள் உங்கள் bot settings மாற்றலாம்.\n\n` +
                     `◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢\n` +
                     `❪❪ UNITY-MD ❫❫ | ® UNITY TEAM`;
                   await sock.sendMessage(botJid, { text: passMsg }).catch(() => {});
