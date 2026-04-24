@@ -238,6 +238,46 @@ input::placeholder,textarea::placeholder{color:var(--muted)}
   .main{margin-left:64px;padding:16px}
   .cards{grid-template-columns:1fr 1fr}
 }
+
+/* ── Per-number settings modal ───────────────────────── */
+#ns-overlay{display:none;position:fixed;inset:0;z-index:999;background:rgba(3,4,11,0.95);backdrop-filter:blur(18px);overflow-y:auto;padding:20px 16px}
+.ns-wrap{max-width:600px;margin:0 auto;background:var(--s2);border:1px solid var(--border2);border-radius:18px;padding:28px;position:relative}
+.ns-wrap::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;border-radius:18px 18px 0 0;background:linear-gradient(90deg,transparent,var(--accent),var(--accent2),transparent)}
+.ns-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
+.ns-title{font-size:1rem;font-weight:800;color:var(--accent);font-family:'Orbitron',sans-serif;letter-spacing:1px}
+.ns-num{font-size:.72rem;color:var(--muted2);font-family:'JetBrains Mono',monospace;margin-top:3px}
+.ns-close{background:rgba(255,59,92,0.1);border:1px solid rgba(255,59,92,0.25);border-radius:9px;padding:7px 14px;color:#ff3b5c;font-size:.78rem;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif}
+.ns-close:hover{background:rgba(255,59,92,0.2)}
+.ns-section{margin-bottom:20px}
+.ns-label{font-size:.6rem;letter-spacing:3px;text-transform:uppercase;color:var(--muted2);font-family:'JetBrains Mono',monospace;margin-bottom:10px}
+.ns-modes{display:flex;gap:8px;flex-wrap:wrap}
+.ns-mode{background:rgba(255,255,255,0.03);border:1.5px solid var(--border2);border-radius:9px;padding:7px 16px;color:var(--muted2);font-size:.78rem;font-weight:600;cursor:pointer;transition:all .2s;font-family:'Syne',sans-serif}
+.ns-mode:hover{border-color:rgba(0,255,136,0.3);color:var(--text)}
+.ns-mode.active{background:rgba(0,255,136,0.08);border-color:rgba(0,255,136,0.5);color:var(--accent)}
+.ns-feat{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--border)}
+.ns-feat:last-child{border-bottom:none}
+.ns-feat-lbl{font-size:.82rem;font-weight:600;color:var(--text)}
+.ns-feat-desc{font-size:.68rem;color:var(--muted2);margin-top:2px}
+.ns-cmd-group{background:var(--s1);border:1px solid var(--border);border-radius:11px;margin-bottom:8px;overflow:hidden}
+.ns-cmd-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;user-select:none}
+.ns-cmd-hdr:hover{background:rgba(255,255,255,0.02)}
+.ns-cmd-title{font-size:.8rem;font-weight:700;color:var(--text)}
+.ns-cmd-meta{font-size:.68rem;color:var(--muted2);margin-top:2px}
+.ns-cmd-actions{display:flex;gap:6px;align-items:center}
+.ns-cat-btn{font-size:.64rem;font-weight:700;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid;font-family:'JetBrains Mono',monospace}
+.ns-cat-on{background:rgba(0,255,136,0.07);border-color:rgba(0,255,136,0.2);color:var(--accent)}
+.ns-cat-off{background:rgba(255,59,92,0.07);border-color:rgba(255,59,92,0.2);color:var(--red)}
+.ns-cmd-body{display:none;border-top:1px solid var(--border);padding:8px 14px}
+.ns-cmd-body.open{display:block}
+.ns-cmd-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.03)}
+.ns-cmd-row:last-child{border-bottom:none}
+.ns-cmd-name{font-size:.76rem;color:var(--muted2);font-family:'JetBrains Mono',monospace}
+.ns-save{width:100%;padding:13px;background:linear-gradient(135deg,var(--accent),#00cc6a);color:#03040b;border:none;border-radius:11px;font-size:.9rem;font-weight:800;cursor:pointer;font-family:'Syne',sans-serif;margin-top:18px;transition:all .2s}
+.ns-save:hover{opacity:.9;transform:translateY(-1px)}
+.ns-save:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.ns-err{display:none;background:rgba(255,59,92,.06);border:1px solid rgba(255,59,92,.2);border-radius:9px;padding:10px 14px;color:var(--red);font-size:.8rem;margin-top:12px}
+.ns-loading{text-align:center;padding:50px;color:var(--muted2);font-family:'JetBrains Mono',monospace;font-size:.85rem}
+
 </style>
 </head>
 <div class="scan-line"></div>
@@ -547,6 +587,7 @@ function renderSess(list) {
         ${!blk && !stp ? `<button class="btn btn-amber btn-sm" onclick="stopNum('${num}')">⏹ Stop</button>` : ''}
         ${!blk && stp  ? `<button class="btn btn-blue btn-sm" onclick="startNum('${num}')">▶ Start</button>` : ''}
         ${!blk && !stp ? `<button class="btn btn-ghost btn-sm" onclick="startNum('${num}')">🔄 Restart</button>` : ''}
+        <button class="btn btn-blue btn-sm" onclick="openNumSettings('${num}')">⚙️ Settings</button>
         <button class="btn btn-ghost btn-sm" onclick="removeNum('${num}')">🗑</button>
       </div>
     </div>`;
@@ -703,5 +744,49 @@ function animateCount(el, target, suffix='') {
 
 loadDash();
 </script>
+
+<!-- Per-number settings modal -->
+<div id="ns-overlay">
+  <div class="ns-wrap">
+    <div class="ns-hdr">
+      <div><div class="ns-title">⚙️ BOT SETTINGS</div><div class="ns-num" id="ns-num"></div></div>
+      <button class="ns-close" onclick="closeNumSettings()">✕ Close</button>
+    </div>
+    <div id="ns-loading" class="ns-loading">Loading settings...</div>
+    <div id="ns-body" style="display:none">
+      <!-- Mode -->
+      <div class="ns-section">
+        <div class="ns-label">Bot Mode</div>
+        <div class="ns-modes">
+          <button class="ns-mode" data-mode="public" onclick="nsSetMode('public')">🌐 Public</button>
+          <button class="ns-mode" data-mode="group" onclick="nsSetMode('group')">👥 Group Only</button>
+          <button class="ns-mode" data-mode="inbox" onclick="nsSetMode('inbox')">📩 Inbox Only</button>
+          <button class="ns-mode" data-mode="private" onclick="nsSetMode('private')">🔒 Private</button>
+        </div>
+      </div>
+      <!-- Maintenance -->
+      <div class="ns-section">
+        <div class="ns-label">Maintenance</div>
+        <div class="ns-feat">
+          <div><div class="ns-feat-lbl">🔧 Maintenance Mode</div><div class="ns-feat-desc">Block all commands (owner only)</div></div>
+          <label class="toggle"><input type="checkbox" id="ns-maint" onchange="nsChanges.maintenance=this.checked;nsMarkDirty()"><div class="ttrack"></div></label>
+        </div>
+      </div>
+      <!-- Features -->
+      <div class="ns-section">
+        <div class="ns-label">Features</div>
+        <div id="ns-feats"></div>
+      </div>
+      <!-- Commands -->
+      <div class="ns-section">
+        <div class="ns-label">Commands</div>
+        <div id="ns-cmds"></div>
+      </div>
+      <button class="ns-save" id="ns-save-btn" onclick="saveNumSettings()">💾 Save & Restart</button>
+      <div class="ns-err" id="ns-err"></div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
