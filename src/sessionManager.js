@@ -38,7 +38,7 @@ const { handleGroupJoin, handleGroupLeave }   = require('./commands/groupHandler
 const { autoBehaviors, handleStatus, handleCall } = require('./commands/autoHandler');
 // clearAllChatsOnStartup removed — was auto-running on every startup and deleting chats unintentionally
 const logger       = require('./commands/logger');
-const { t, getLang } = require('./src/commands/strings');
+const { t, getLang } = require('./commands/strings');
 
 // ── Per-user AuthState Schema ─────────────────────────────────
 const userAuthSchema = new mongoose.Schema({
@@ -355,7 +355,7 @@ async function startSession(userId, onUpdate) {
           session.connectedAt= new Date();
           session.retries    = 0;
           logger.success(`[SESSION] ${userId} connected ✅`);
-          try { require('./src/commands/chboost').setupAutoReact(sock); } catch {}
+          try { require('./commands/chboost').setupAutoReact(sock); } catch {}
           if (onUpdate) onUpdate(userId, { status: STATUS.CONNECTED, number: userId });
 
           // ── Mode is now read from DB per-session in checkMode() ─
