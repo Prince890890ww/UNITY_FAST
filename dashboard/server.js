@@ -269,8 +269,39 @@ app.get('/api/groups', requireAuth, async (req, res) => {
   res.json({ groups });
 });
 
+// ── Pair settings session auth ────────────────────────────────
+// Token expires 30 min after password verify
+function requirePairAuth(req, res, next) {
+  const userId  = req.params.number.replace(/[^0-9]/g, '');
+  const expires = req.session?.['pairAuth_' + userId];
+  if (expires && expires > Date.now()) return next();
+  res.status(403).json({ ok: false, error: 'PASSWORD_REQUIRED' });
+}
+
+// ── Verify settings password ──────────────────────────────────
+app.post('/api/pair/verify/:number', async (req, res) => {
+  const userId = req.params.number.replace(/[^0-9]/g, '');
+  if (!userId) return res.status(400).json({ ok: false, error: 'Invalid number' });
+  const { password } = req.body;
+  if (!password) return res.status(400).json({ ok: false, error: 'No password' });
+  try {
+    const botCfg = await db.getBotConfig(userId);
+    if (!botCfg.sessionPassword) {
+      return res.status(404).json({ ok: false, error: 'NO_PASSWORD' });
+    }
+    if (password.trim() !== botCfg.sessionPassword) {
+      return res.status(401).json({ ok: false, error: 'WRONG_PASSWORD' });
+    }
+    // Grant 30-minute access token via session
+    req.session['pairAuth_' + userId] = Date.now() + 30 * 60 * 1000;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── Per-user BotConfig: GET settings ─────────────────────────
-app.get('/api/pair/settings/:number', async (req, res) => {
+app.get('/api/pair/settings/:number', requirePairAuth, async (req, res) => {
   const userId = req.params.number.replace(/[^0-9]/g, '');
   if (!userId) return res.status(400).json({ ok: false, error: 'Invalid number' });
   try {
@@ -302,7 +333,7 @@ app.get('/api/pair/settings/:number', async (req, res) => {
 });
 
 // ── Per-user BotConfig: SAVE settings + restart that session ─
-app.post('/api/pair/settings/:number', async (req, res) => {
+app.post('/api/pair/settings/:number', requirePairAuth, async (req, res) => {
   const userId = req.params.number.replace(/[^0-9]/g, '');
   if (!userId) return res.status(400).json({ ok: false, error: 'Invalid number' });
   const { commands, features, mode, maintenance } = req.body;
