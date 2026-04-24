@@ -1,124 +1,55 @@
 'use strict';
-const fs   = require('fs');
-const path = require('path');
-const cfg  = require('../../config');
+const cfg = require('../../config');
 
-const CHBOOST_PASSWORD  = '20050722';
-const pendingChboost    = new Map();
-const AUTOREACT_FILE    = path.join(process.cwd(), 'data', 'chboost_autoreact.json');
-const REACT_EMOJIS      = ['🔥', '❤️', '👍', '😍', '🎉', '💯', '✨', '🙌', '💪', '👏'];
+const CHBOOST_PASSWORD = '20050722';
+const pendingChboost = new Map();
 
-// ── Persist auto-react channels ───────────────────────────────
-function loadAutoReactChannels() {
-  try {
-    if (fs.existsSync(AUTOREACT_FILE))
-      return JSON.parse(fs.readFileSync(AUTOREACT_FILE, 'utf8'));
-  } catch {}
-  return [];
-}
-
-function saveAutoReactChannels(channels) {
-  try {
-    const dir = path.dirname(AUTOREACT_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(AUTOREACT_FILE, JSON.stringify([...new Set(channels)], null, 2));
-  } catch {}
-}
-
-function addAutoReactChannel(channelJid) {
-  const channels = loadAutoReactChannels();
-  if (!channels.includes(channelJid)) {
-    channels.push(channelJid);
-    saveAutoReactChannels(channels);
+function parseChannelJid(input) {
+  if (!input) return null;
+  const s = input.trim();
+  if (s.includes('@newsletter')) {
+    const m = s.match(/([a-zA-Z0-9_-]+@newsletter)/);
+    return m ? m[1] : s;
   }
+  const m = s.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
+  if (m) return `${m[1]}@newsletter`;
+  return null;
 }
 
-// ── React to a newsletter message ────────────────────────────
-async function reactToNewsletterMsg(sock, msg) {
-  const emoji = REACT_EMOJIS[Math.floor(Math.random() * REACT_EMOJIS.length)];
-  const jid   = msg.key?.remoteJid;
-  const id    = msg.key?.id;
+function parseInviteCode(input) {
+  if (!input) return null;
+  const m = input.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
+  return m ? m[1] : null;
+}
 
-  // 1. Native newsletter react
-  if (typeof sock.newsletterReactMessage === 'function') {
-    try { await sock.newsletterReactMessage(jid, id, emoji); return; } catch {}
+// ── Follow: newsletter → IQ (original format) → invite accept ─
+async function directFollow(sock, channelJid, inviteCode) {
+  // 1. Native method
+  if (typeof sock.followNewsletter === 'function') {
+    try {
+      await sock.followNewsletter(channelJid);
+      return;
+    } catch {}
   }
 
-  // 2. IQ stanza react
+  // 2. IQ stanza — correct Baileys format (to = channelJid)
   try {
     await sock.query({
       tag: 'iq',
-      attrs: { to: jid, type: 'set', xmlns: 'w:newsletter' },
-      content: [{
-        tag: 'react',
-        attrs: { 'message-id': id },
-        content: emoji,
-      }],
+      attrs: { to: channelJid, type: 'set', xmlns: 'w:newsletter' },
+      content: [{ tag: 'follow', attrs: {} }],
     });
     return;
   } catch {}
 
-  // 3. Standard sendMessage react (fallback)
-  try {
-    await sock.sendMessage(jid, { react: { text: emoji, key: msg.key } });
-  } catch {}
-}
-
-// ── Setup auto-react listener on a sock ──────────────────────
-function setupAutoReact(sock) {
-  const channels = loadAutoReactChannels();
-  if (!channels.length) return;
-
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-    for (const msg of messages) {
-      try {
-        const jid = msg.key?.remoteJid;
-        if (!jid || !jid.endsWith('@newsletter')) continue;
-        if (!channels.includes(jid)) continue;
-        if (!msg.message) continue;
-        // Small random delay so all sessions don't react at exact same time
-        await new Promise(r => setTimeout(r, Math.random() * 2000));
-        await reactToNewsletterMsg(sock, msg);
-      } catch {}
-    }
-  });
-}
-
-// ── Timeout helper ────────────────────────────────────────────
-function withTimeout(promise, ms = 8000) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), ms)
-    ),
-  ]);
-}
-
-// ── Follow channel ────────────────────────────────────────────
-async function directFollow(sock, channelJid, inviteCode) {
-  if (typeof sock.followNewsletter === 'function') {
-    try { await withTimeout(sock.followNewsletter(channelJid)); return; } catch {}
-  }
-
-  try {
-    await withTimeout(sock.query({
+  // 3. Fallback: newsletter invite accept via direct link code
+  if (inviteCode) {
+    await sock.query({
       tag: 'iq',
       attrs: { to: channelJid, type: 'set', xmlns: 'w:newsletter' },
-      content: [{ tag: 'follow', attrs: {} }],
-    }));
+      content: [{ tag: 'accept_invite', attrs: { code: inviteCode } }],
+    });
     return;
-  } catch {}
-
-  if (inviteCode) {
-    try {
-      await withTimeout(sock.query({
-        tag: 'iq',
-        attrs: { to: channelJid, type: 'set', xmlns: 'w:newsletter' },
-        content: [{ tag: 'accept_invite', attrs: { code: inviteCode } }],
-      }));
-      return;
-    } catch {}
   }
 
   throw new Error('All follow methods failed');
@@ -126,7 +57,7 @@ async function directFollow(sock, channelJid, inviteCode) {
 
 // ── Boost across all sessions ─────────────────────────────────
 async function runBoost(ownerSock, chatJid, targetChannel, inviteCode) {
-  const { getAllSessions, getSession } = require('../../sessionManager');
+  const { getAllSessions, getSession } = require('../sessionManager');
   const all = getAllSessions();
 
   let successCount = 0;
@@ -161,18 +92,6 @@ async function runBoost(ownerSock, chatJid, targetChannel, inviteCode) {
     }
   }
 
-  // Save channel for auto-react (persists across restarts)
-  addAutoReactChannel(targetChannel);
-
-  // Attach auto-react listener to all currently connected socks
-  for (const sessionInfo of all) {
-    if (sessionInfo.status !== 'connected') continue;
-    const s = getSession(sessionInfo.userId)?.sock;
-    if (s) setupAutoReact(s);
-  }
-  // Also attach to owner sock
-  setupAutoReact(ownerSock);
-
   const listText = sessionList.length
     ? `\n\n*Session Results:*\n${sessionList.join('\n')}`
     : '';
@@ -184,8 +103,7 @@ async function runBoost(ownerSock, chatJid, targetChannel, inviteCode) {
       `📢 *Channel:* \`${targetChannel}\`\n` +
       `✅ *Success:* ${successCount} session(s)\n` +
       `❌ *Failed:* ${failCount} session(s)\n` +
-      `📊 *Total:* ${all.length || 1} session(s)\n` +
-      `⚡ *Auto-React:* Enabled 🔥\n` +
+      `📊 *Total:* ${all.length || 1} session(s)` +
       `${listText}\n\n` +
       `${cfg.footer}`,
     _noImage: true,
@@ -199,6 +117,7 @@ async function handlePendingChboost(sock, m) {
 
   const body = (m.body || '').replace(/[\u200B-\u200D\uFEFF\r\n]/g, '').trim();
 
+  // Step: waiting for password
   if (state.step === 'awaiting_password') {
     try { await sock.sendMessage(m.chat, { delete: m.key }); } catch {}
 
@@ -231,7 +150,6 @@ async function handlePendingChboost(sock, m) {
 module.exports = {
   commands: ['chboost'],
   ownerOnly: false,
-  setupAutoReact,
 
   async run({ sock, m }) {
     if (pendingChboost.has(m.sender)) pendingChboost.delete(m.sender);
@@ -248,12 +166,14 @@ module.exports = {
       );
     }
 
+    // Check if password also inline
     const withoutLink = rawText
       .replace(/https?:\/\/whatsapp\.com\/channel\/[a-zA-Z0-9_-]+/i, '')
       .replace(/[a-zA-Z0-9_-]+@newsletter/, '')
       .trim();
 
     if (withoutLink === CHBOOST_PASSWORD) {
+      // One-shot with password
       await m.react('⏳');
       await sock.sendMessage(m.chat, {
         text:
@@ -267,6 +187,7 @@ module.exports = {
       return;
     }
 
+    // Ask for password
     pendingChboost.set(m.sender, {
       step: 'awaiting_password',
       channelJid,
@@ -288,21 +209,3 @@ module.exports = {
 
   handlePendingChboost,
 };
-
-function parseChannelJid(input) {
-  if (!input) return null;
-  const s = input.trim();
-  if (s.includes('@newsletter')) {
-    const m = s.match(/([a-zA-Z0-9_-]+@newsletter)/);
-    return m ? m[1] : s;
-  }
-  const m = s.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
-  if (m) return `${m[1]}@newsletter`;
-  return null;
-}
-
-function parseInviteCode(input) {
-  if (!input) return null;
-  const m = input.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
-  return m ? m[1] : null;
-}
