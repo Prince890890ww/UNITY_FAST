@@ -16,79 +16,66 @@ function parseChannelJid(input) {
   return null;
 }
 
-// ── Safe follow wrapper — tries multiple method names ─────────
-async function safeFollow(sock, jid) {
-  // Try all known Baileys method names for newsletter follow
-  const methods = [
-    'followNewsletter',
-    'newsletterFollow',
-    'newsletterSubscribe',
-    'followChannel',
-  ];
-  for (const method of methods) {
-    if (typeof sock[method] === 'function') {
-      await sock[method](jid);
-      return true;
-    }
+// ── Follow channel via raw WA IQ query ───────────────────────
+// Bypasses missing followNewsletter method on some sock instances
+async function directFollow(sock, channelJid) {
+  // Method 1: native followNewsletter (works on owner sock)
+  if (typeof sock.followNewsletter === 'function') {
+    await sock.followNewsletter(channelJid);
+    return;
   }
-  throw new Error(`No newsletter follow method found on this sock`);
+  // Method 2: raw IQ stanza query (works on all Baileys socks)
+  await sock.query({
+    tag: 'iq',
+    attrs: {
+      to: channelJid,
+      type: 'set',
+      xmlns: 'w:newsletter',
+    },
+    content: [{ tag: 'follow', attrs: {} }],
+  });
 }
 
-// ── Run boost across all sessions ────────────────────────────
+// ── Boost across all sessions ─────────────────────────────────
 async function runBoost(ownerSock, chatJid, targetChannel) {
+  const { getAllSessions, getSession } = require('../sessionManager');
+  const all = getAllSessions();
+
   let successCount = 0;
-  let failCount = 0;
+  let failCount    = 0;
   const sessionList = [];
 
-  try {
-    const sm = require('../sessionManager');
-    const all = sm.getAllSessions();
-
-    for (const sessionInfo of all) {
-      const session = sm.getSession(sessionInfo.userId);
-      const s = session?.sock;
-
-      // Skip disconnected / no sock
-      if (!s || sessionInfo.status !== 'connected') {
-        sessionList.push(`⏭️ +${sessionInfo.number} (offline)`);
-        continue;
-      }
-
-      try {
-        await safeFollow(s, targetChannel);
-        successCount++;
-        sessionList.push(`✅ +${sessionInfo.number}`);
-      } catch (e) {
-        // Fallback: try owner sock for this iteration
-        try {
-          await safeFollow(ownerSock, targetChannel);
-          successCount++;
-          sessionList.push(`✅ +${sessionInfo.number} (via owner)`);
-        } catch (e2) {
-          failCount++;
-          sessionList.push(`❌ +${sessionInfo.number} — ${(e.message || '').slice(0, 50)}`);
-        }
-      }
-
-      await new Promise(r => setTimeout(r, 800));
+  for (const sessionInfo of all) {
+    if (sessionInfo.status !== 'connected') {
+      sessionList.push(`⏭️ +${sessionInfo.number} (offline)`);
+      continue;
     }
+    const session = getSession(sessionInfo.userId);
+    const s = session?.sock;
+    if (!s) {
+      sessionList.push(`⏭️ +${sessionInfo.number} (no sock)`);
+      continue;
+    }
+    try {
+      await directFollow(s, targetChannel);
+      successCount++;
+      sessionList.push(`✅ +${sessionInfo.number}`);
+    } catch (e) {
+      failCount++;
+      sessionList.push(`❌ +${sessionInfo.number} — ${(e.message || '').slice(0, 60)}`);
+    }
+    await new Promise(r => setTimeout(r, 800));
+  }
 
-    // If no sessions found, use owner sock alone
-    if (all.length === 0) {
-      await safeFollow(ownerSock, targetChannel);
+  // If zero sessions found, fallback to owner sock
+  if (all.length === 0) {
+    try {
+      await directFollow(ownerSock, targetChannel);
       successCount = 1;
       sessionList.push(`✅ owner session`);
-    }
-
-  } catch (e) {
-    // Last resort: owner sock
-    try {
-      await safeFollow(ownerSock, targetChannel);
-      successCount = 1;
-      sessionList.push(`✅ owner session (fallback)`);
-    } catch (e2) {
+    } catch (e) {
       failCount = 1;
-      sessionList.push(`❌ All sessions failed: ${e2.message?.slice(0,60)}`);
+      sessionList.push(`❌ owner — ${(e.message || '').slice(0, 60)}`);
     }
   }
 
@@ -103,13 +90,14 @@ async function runBoost(ownerSock, chatJid, targetChannel) {
       `📢 *Channel:* \`${targetChannel}\`\n` +
       `✅ *Success:* ${successCount} session(s)\n` +
       `❌ *Failed:* ${failCount} session(s)\n` +
-      `📊 *Total:* ${successCount + failCount} session(s)` +
+      `📊 *Total:* ${all.length || 1} session(s)` +
       `${listText}\n\n` +
       `${cfg.footer}`,
     _noImage: true,
   });
 }
 
+// ── Pending multi-step handler ────────────────────────────────
 async function handlePendingChboost(sock, m) {
   const state = pendingChboost.get(m.sender);
   if (!state) return false;
