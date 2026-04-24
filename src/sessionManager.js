@@ -309,15 +309,6 @@ async function startSession(userId, onUpdate) {
             return;
           }
 
-          // 515 = restartRequired: normal post-pairing WA handshake
-          // Reconnect immediately so the session activates without delay
-          if (reason === DisconnectReason.restartRequired) {
-            logger.info(`[SESSION] ${userId} restart required (515) — reconnecting immediately`);
-            session.pairCode = null;
-            setImmediate(() => connect());
-            return;
-          }
-
           const noRetry = [
             DisconnectReason.loggedOut,
             DisconnectReason.forbidden,
