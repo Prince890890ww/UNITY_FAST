@@ -743,6 +743,147 @@ function animateCount(el, target, suffix='') {
 }
 
 loadDash();
+
+// ── Per-number settings modal ─────────────────────────────────
+let nsNum=null,nsData=null,nsChanges={commands:{},features:{},mode:null,maintenance:null};
+const NS_FEATS={
+  autoRecording:['🎙 Auto Recording','Auto-record voice notes'],
+  autoOnline:['🟢 Always Online','Always show online'],
+  autoRead:['✅ Auto Read','Mark messages read instantly'],
+  autoTyping:['⌨️ Auto Typing','Show typing indicator'],
+  autoBio:['📝 Auto Bio','Rotate bio automatically'],
+  didYouMean:['💡 Did You Mean','Suggest corrections'],
+  antiCall:['🚫 Anti Call','Block incoming calls']
+};
+
+function openNumSettings(num){
+  nsNum=num; nsData=null;
+  nsChanges={commands:{},features:{},mode:null,maintenance:null};
+  document.getElementById('ns-num').textContent='+'+num;
+  document.getElementById('ns-loading').style.display='block';
+  document.getElementById('ns-loading').textContent='Loading settings...';
+  document.getElementById('ns-body').style.display='none';
+  document.getElementById('ns-err').style.display='none';
+  const btn=document.getElementById('ns-save-btn');
+  if(btn){btn.disabled=false;btn.textContent='💾 Save & Restart';}
+  document.getElementById('ns-overlay').style.display='block';
+  loadNumSettings();
+}
+
+function closeNumSettings(){
+  document.getElementById('ns-overlay').style.display='none';
+}
+
+function nsMarkDirty(){
+  const btn=document.getElementById('ns-save-btn');
+  if(btn) btn.textContent='💾 Save & Restart';
+}
+
+function nsSetMode(m){
+  nsChanges.mode=m;
+  document.querySelectorAll('.ns-mode').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+  nsMarkDirty();
+}
+
+async function loadNumSettings(){
+  try{
+    const r=await fetch('/api/pair/settings/'+nsNum);
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'Failed to load');
+    nsData=d;
+    renderNumSettings();
+  }catch(e){
+    document.getElementById('ns-loading').textContent='⚠️ '+e.message;
+  }
+}
+
+function renderNumSettings(){
+  document.getElementById('ns-loading').style.display='none';
+  document.getElementById('ns-body').style.display='block';
+  const m=nsData.mode||'public';
+  document.querySelectorAll('.ns-mode').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+  const maintEl=document.getElementById('ns-maint');
+  if(maintEl) maintEl.checked=!!nsData.maintenance;
+  // Features
+  const fl=document.getElementById('ns-feats'); fl.innerHTML='';
+  const feats=nsData.features||{};
+  for(const[key,[label,desc]] of Object.entries(NS_FEATS)){
+    const div=document.createElement('div'); div.className='ns-feat';
+    div.innerHTML=`<div><div class="ns-feat-lbl">${label}</div><div class="ns-feat-desc">${desc}</div></div>`+
+      `<label class="toggle"><input type="checkbox" id="nsf-${key}" ${feats[key]?'checked':''}`+
+      ` onchange="nsChanges.features['${key}']=this.checked;nsMarkDirty()"><div class="ttrack"></div></label>`;
+    fl.appendChild(div);
+  }
+  // Commands
+  const cg=document.getElementById('ns-cmds'); cg.innerHTML='';
+  for(const[cat,cmds] of Object.entries(nsData.groups||{})){
+    if(!cmds.length) continue;
+    const sc=cat.replace(/[^a-zA-Z0-9]/g,'_');
+    const on=cmds.filter(c=>c.enabled).length;
+    const card=document.createElement('div'); card.className='ns-cmd-group';
+    const rows=cmds.map(c=>
+      `<div class="ns-cmd-row"><div class="ns-cmd-name">.${c.cmd}</div>`+
+      `<label class="toggle"><input type="checkbox" id="nsc-${c.cmd}" ${c.enabled?'checked':''}`+
+      ` onchange="nsChanges.commands['${c.cmd}']=this.checked;nsUpdateMeta('${sc}',${cmds.length});nsMarkDirty()">`+
+      `<div class="ttrack"></div></label></div>`
+    ).join('');
+    card.innerHTML=
+      `<div class="ns-cmd-hdr" onclick="nsCatToggle('${sc}')">`+
+        `<div><div class="ns-cmd-title">${cat}</div><div class="ns-cmd-meta" id="ns-meta-${sc}">${on}/${cmds.length} enabled</div></div>`+
+        `<div class="ns-cmd-actions">`+
+          `<button class="ns-cat-btn ns-cat-on" onclick="event.stopPropagation();nsCatAll('${sc}',true)">All On</button>`+
+          `<button class="ns-cat-btn ns-cat-off" onclick="event.stopPropagation();nsCatAll('${sc}',false)">All Off</button>`+
+          `<span id="ns-arr-${sc}" style="color:var(--muted2);font-size:.7rem;margin-left:4px">▼</span>`+
+        `</div>`+
+      `</div>`+
+      `<div class="ns-cmd-body" id="ns-body-${sc}">${rows}</div>`;
+    cg.appendChild(card);
+  }
+}
+
+function nsCatToggle(sc){
+  const b=document.getElementById('ns-body-'+sc);
+  const a=document.getElementById('ns-arr-'+sc);
+  b.classList.toggle('open');
+  if(a) a.textContent=b.classList.contains('open')?'▲':'▼';
+}
+
+function nsCatAll(sc,val){
+  const body=document.getElementById('ns-body-'+sc);
+  body.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+    const cmd=cb.id.replace('nsc-','');
+    nsChanges.commands[cmd]=val; cb.checked=val;
+  });
+  nsMarkDirty();
+}
+
+function nsUpdateMeta(sc,total){
+  const body=document.getElementById('ns-body-'+sc);
+  const on=body.querySelectorAll('input:checked').length;
+  const meta=document.getElementById('ns-meta-'+sc);
+  if(meta) meta.textContent=on+'/'+total+' enabled';
+}
+
+async function saveNumSettings(){
+  const btn=document.getElementById('ns-save-btn');
+  btn.disabled=true; btn.textContent='⏳ Saving...';
+  try{
+    const body={commands:nsChanges.commands,features:nsChanges.features};
+    if(nsChanges.mode) body.mode=nsChanges.mode;
+    if(nsChanges.maintenance!==null) body.maintenance=nsChanges.maintenance;
+    const r=await fetch('/api/pair/settings/'+nsNum,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'Save failed');
+    btn.textContent='✅ Saved! Restarting...';
+    nsChanges={commands:{},features:{},mode:null,maintenance:null};
+    setTimeout(()=>{btn.disabled=false;btn.textContent='💾 Save & Restart';setTimeout(loadNumSettings,4000);},2500);
+  }catch(e){
+    const err=document.getElementById('ns-err');
+    err.textContent='⚠️ '+e.message; err.style.display='block';
+    btn.disabled=false; btn.textContent='💾 Save & Restart';
+  }
+}
+
 </script>
 
 <!-- Per-number settings modal -->
