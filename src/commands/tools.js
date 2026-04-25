@@ -100,7 +100,7 @@ module.exports = {
   commands: [
     'tts', 'texttospeech',
     'tr', 'translate',
-    'qr', 'toqr',
+    'qr', 'toqr', 'qrlink',
     'ping', 'speed',
     'runtime',
     'calc', 'calculate',
@@ -280,6 +280,26 @@ module.exports = {
         await m.react('❌');
         return m.reply(`❌ QR failed: ${e.message}\n\n${cfg.footer}`);
       }
+    }
+
+    // ── QRLINK ────────────────────────────────────────────────
+    if (cmd === 'qrlink') {
+      if (!text) return m.reply(`📌 Usage: *.qrlink* [link or text]\nGenerates a QR code and gives you a direct image link.\n\n${cfg.footer}`);
+      await m.react('⏳');
+      try {
+        const buf = await QRCode.toBuffer(text, { errorCorrectionLevel: 'H', width: 512 });
+        // Upload QR image and get direct link
+        const qrUrl = await uploadImage(buf);
+        await sock.sendMessage(chat, {
+          image: buf,
+          caption: `📱 *QR Code*\n\n📝 *Content:* ${text.slice(0, 80)}\n\n🔗 *Direct QR Link:*\n${qrUrl}\n\n${cfg.footer}`,
+        }, { quoted: msg });
+        await m.react('✅');
+      } catch (e) {
+        await m.react('❌');
+        return m.reply(`❌ QR Link failed: ${e.message}\n\n${cfg.footer}`);
+      }
+      return;
     }
 
     // ── STICKER ───────────────────────────────────────────────

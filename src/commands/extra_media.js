@@ -318,6 +318,52 @@ async function runTake(sock, m) {
   }
 }
 
+// ── IMAGETOLINK ───────────────────────────────────────────────
+async function runImageToLink(sock, m) {
+  const chat = m.chat;
+  const msg = m.msg;
+
+  await m.react('⏳');
+  try {
+    let imageBuffer = null;
+
+    // Check quoted image
+    const quoted = msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+    if (quoted?.imageMessage) {
+      const stream = await downloadContentFromMessage(quoted.imageMessage, 'image');
+      const chunks = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      imageBuffer = Buffer.concat(chunks);
+    } else if (msg?.message?.imageMessage) {
+      // Direct image sent with command as caption
+      const stream = await downloadContentFromMessage(msg.message.imageMessage, 'image');
+      const chunks = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      imageBuffer = Buffer.concat(chunks);
+    }
+
+    if (!imageBuffer) {
+      await m.react('❌');
+      return sendButtons(sock, chat, {
+        text: `📌 *IMAGE TO LINK*\n\nReply to or send an image with *.imagetolink*\nUploads image and gives you a direct link.\n\n${cfg.footer}`,
+        footer: cfg.footer,
+        buttons: [{ label: '📋 Menu', id: '.menu' }],
+        quoted: msg,
+      });
+    }
+
+    const url = await uploadImage(imageBuffer);
+
+    await sock.sendMessage(chat, {
+      text: `🔗 *Image Direct Link*\n\n${url}\n\n✅ Link is ready to share!\n\n${cfg.footer}`,
+    }, { quoted: msg });
+    await m.react('✅');
+  } catch (e) {
+    await m.react('❌');
+    return m.reply(`❌ Upload failed: ${e.message}\n\n${cfg.footer}`);
+  }
+}
+
 // ── VIEWONCE ──────────────────────────────────────────────────
 async function runViewonce(sock, m) {
   const chat = m.chat;
@@ -352,7 +398,7 @@ async function runViewonce(sock, m) {
 }
 
 module.exports = {
-  commands: ['emojimix', 'attp', 'removebg', 'rmbg', 'nobg', 'remini', 'take', 'rvo', 'viewonce', 'revealvo'],
+  commands: ['emojimix', 'attp', 'removebg', 'rmbg', 'nobg', 'remini', 'take', 'rvo', 'viewonce', 'revealvo', 'imagetolink', 'imgtolink', 'imglink'],
 
   async run({ sock, m }) {
     const tr = await getT(m.sessionOwner);
@@ -363,5 +409,6 @@ module.exports = {
     if (cmd === 'remini') return runRemini(sock, m);
     if (cmd === 'take') return runTake(sock, m);
     if (['rvo', 'viewonce', 'revealvo'].includes(cmd)) return runViewonce(sock, m);
+    if (['imagetolink', 'imgtolink', 'imglink'].includes(cmd)) return runImageToLink(sock, m);
   },
 };

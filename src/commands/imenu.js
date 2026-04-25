@@ -187,9 +187,9 @@ const SECTIONS = [
   { file: 'menu_02.jpg', icon: '👥', titleKey: 'imenu_title_group',   cmd: 'groupmenu',    labelKey: 'imenu_open_group',   cmds: ['tagall', 'hidetag', 'add', 'kick', 'promote', 'demote', 'welcome', 'setname', 'setdesc', 'grouplink', 'glink', 'warn', 'warnings', 'resetwarn', 'ban', 'unban', 'mute', 'unmute', 'unwarn', 'remove', 'everyone', 'tgall', 'tgna', 'tagnotadmin', 'tag', 'del', 'delete', 'ginfo', 'resetlink', 'newlink', 'poll', 'pin', 'unpin', 'disappearing', 'topmembers', 'topmsg', 'approve', 'acceptreq', 'reject', 'rejectreq', 'viewreq', 'joinrequests', 'addmember', 'removeall', 'kickall', 'kickme', 'leavegroup', 'setsubject', 'setdescription', 'invitelink', 'link', 'tagadmin', 'tgadmin', 'opentime', 'closetime', 'open', 'close', 'rules', 'setrules', 'faq', 'setfaq', 'copygc', 'linkgc', 'revoke', 'membercount', 'members', 'kickinactive', 'setkeyword', 'addkeyword', 'delkeyword', 'antitag', 'staff'] },
   { file: 'menu_03.jpg', icon: '📥', titleKey: 'imenu_title_dl',      cmd: 'downloadmenu', labelKey: 'imenu_open_dl',      cmds: ['song', 'mp3', 'play', 'tiktok', 'mp4', 'video', 'filmdownload', 'instagram', 'facebook', 'twitter', 'twdl', 'mediafire', 'mfire', 'ig', 'fb', 'gdrive', 'gdrive2', 'googledrive', 'downurl', 'down', 'dlurl', 'apk', 'apkdl', 'rw', 'wallpaper', 'wall', 'randomwall', 'ytmp3', 'tomp3', 'toaudio', 'tovn', 'tovoice', 'aivoice', 'vai', 'voicex', 'voiceai', 'ytmp4', 'ytvideo', 'vid', 'ytsong', 'song2', 'play2', 'play3', 'ttdl', 'tt', 'ttmp4', 'ttsearch', 'pinsearch', 'pinterest', 'fdl', 'fdownload', 'movie', 'cinesubz', 'sinhalafilm', 'sinhalamovie'] },
   { file: 'menu_04.jpg', icon: '🤖', titleKey: 'imenu_title_ai',      cmd: 'aimenu',       labelKey: 'imenu_open_ai',      cmds: ['ai', 'gpt', 'llama3', 'chatai', 'clearai', 'imagine', 'flux', 'sora', 'gemini', 'openai', 'chatgpt', 'gpt3', 'gpt5', 'deepseek', 'deep', 'seekai', 'mistral', 'unity', 'resetai', 'gimage', 'googleimage', 'wiki', 'wikipedia', 'whatsappstalk', 'wastalk', 'githubstalk', 'github', 'github2', 'imdb', 'cricket', 'ytstalk', 'ytinfo', 'xstalk', 'twitterstalk', 'twtstalk', 'tiktokstalk', 'tstalk', 'ttstalk', 'npm', 'npmsearch', 'npminfo', 'srepo', 'repo', 'source'] },
-  { file: 'menu_05.jpg', icon: '🎨', titleKey: 'imenu_title_sticker', cmd: 'stickermenu',  labelKey: 'imenu_open_sticker', cmds: ['sticker', 'attp', 'crop', 'take', 'emojimix', 'rmbg', 'blur', 'remini', 'toimg', 's', 'stiker', 'stickerfit', 'stickercrop', 'stickertoimg', 'removebg', 'nobg', 'rvo', 'viewonce', 'vv', 'retrive', 'revealvo', 'invert', 'negative', 'grayscale', 'resize', 'compress', 'colorize', 'circle', 'square', 'imgpdf', 'topdf', 'toqr'] },
+  { file: 'menu_05.jpg', staticSrc: path.join(__dirname, '../../src/media/unity_thumb.jpg'), icon: '🎨', titleKey: 'imenu_title_sticker', cmd: 'stickermenu',  labelKey: 'imenu_open_sticker', cmds: ['sticker', 'attp', 'crop', 'take', 'emojimix', 'rmbg', 'blur', 'remini', 'toimg', 's', 'stiker', 'stickerfit', 'stickercrop', 'stickertoimg', 'removebg', 'nobg', 'rvo', 'viewonce', 'vv', 'retrive', 'revealvo', 'invert', 'negative', 'grayscale', 'resize', 'compress', 'colorize', 'circle', 'square', 'imgpdf', 'topdf', 'toqr', 'imagetolink', 'imgtolink', 'imglink'] },
   { file: 'menu_06.jpg', icon: '😂', titleKey: 'imenu_title_fun',     cmd: 'funmenu',      labelKey: 'imenu_open_fun',     cmds: ['joke', 'quote', 'fact', 'meme', 'flirt', 'compliment', 'insult', 'wasted', 'hack', 'ship', 'confess', 'confession', 'fakescreenshot', 'fakechat', 'afk', 'delafk', 'joke2', 'comrade', 'namecard', 'character', 'oogway', 'tweet', 'ytcomment', 'triggered', 'spam', 'fakenumber', 'fakeno', 'genfake', 'simp', 'stupid', 'goodnight', 'shayari', 'roseday', 'chatcount', 'nokia', 'nokiamsg', 'jail', 'wanted', 'chuck', 'chucknorris', 'advice', 'activity', 'bored', 'uselessfact', 'kanye', 'catfact', 'catpic', 'dogpic', 'foxpic'] },
-  { file: 'menu_07.jpg', icon: '🛠️', titleKey: 'imenu_title_tools',   cmd: 'toolsmenu',    labelKey: 'imenu_open_tools',   cmds: ['tts', 'tr', 'qr', 'ping', 'runtime', 'calc', 'weather', 'shorturl', 'jid', 'privacy', 'texttospeech', 'translate', 'toqr', 'calculate', 'bmi', 'age', 'pass', 'password', 'ascii', 'fancy', 'styletext', 'morse', 'unmorse', 'binary', 'unbinary', 'mirror', 'reverse', 'zalgo', 'glitch', 'bold', 'italic', 'mono', 'flip', 'sinhalafont', 'uppercase', 'lowercase', 'snake', 'camel', 'logo', 'textlogo', 'url', 'country', 'countryinfo', 'nation', 'simdata', 'siminfo', 'checknum', 'checkwa', 'wacheck', 'wavalidate', 'wanumber', 'numinfo', 'exchange', 'convert', 'crypto', 'cryptoprice', 'colorinfo', 'numfact', 'screenshot', 'ss'] },
+  { file: 'menu_07.jpg', icon: '🛠️', titleKey: 'imenu_title_tools',   cmd: 'toolsmenu',    labelKey: 'imenu_open_tools',   cmds: ['tts', 'tr', 'qr', 'qrlink', 'ping', 'runtime', 'calc', 'weather', 'shorturl', 'jid', 'privacy', 'texttospeech', 'translate', 'toqr', 'calculate', 'bmi', 'age', 'pass', 'password', 'ascii', 'fancy', 'styletext', 'morse', 'unmorse', 'binary', 'unbinary', 'mirror', 'reverse', 'zalgo', 'glitch', 'bold', 'italic', 'mono', 'flip', 'sinhalafont', 'uppercase', 'lowercase', 'snake', 'camel', 'logo', 'textlogo', 'url', 'country', 'countryinfo', 'nation', 'simdata', 'siminfo', 'checknum', 'checkwa', 'wacheck', 'wavalidate', 'wanumber', 'numinfo', 'exchange', 'convert', 'crypto', 'cryptoprice', 'colorinfo', 'numfact', 'screenshot', 'ss'] },
   { file: 'menu_08.jpg', icon: '🎌', titleKey: 'imenu_title_anime',   cmd: 'animemenu',    labelKey: 'imenu_open_anime',   cmds: ['animeinfo','manga','dragonball','dbz'] },
   { file: 'menu_09.jpg', icon: '🎮', titleKey: 'imenu_title_games',   cmd: 'gamemenu',     labelKey: 'imenu_open_games',   cmds: ['ttt', 'hangman', 'trivia', 'truth', 'dare', 'slots', 'slot', 'riddle', 'eightball', 'calc', 'blackjack', 'bj', 'bjhit', 'bjstand', 'guess', 'answer', 'tictactoe', 'tttmove', 'snake'] },
   { file: 'menu_10.jpg', icon: '🛡️', titleKey: 'imenu_title_protection', cmd: 'protectionmenu', labelKey: 'imenu_open_protection', cmds: ['antilink', 'antispam', 'antidelete', 'anticall', 'antitoxic', 'antiforward', 'antiraid', 'flooddetect', 'badwords', 'addbadword', 'delbadword', 'antibadword', 'badword', 'slowmode', 'captcha', 'pmblocker', 'pmblock', 'setwelcome', 'goodbye', 'setgoodbye', 'moroccoblock', 'autoblock'] },
@@ -287,7 +287,10 @@ module.exports = {
 
       for (let i = 0; i < SECTIONS.length; i++) {
         const sec     = SECTIONS[i];
-        const imgPath = path.join(MENU_DIR, sec.file);
+        // Use staticSrc (custom image) if defined, else fall back to menucards file
+        const imgPath = (sec.staticSrc && fs.existsSync(sec.staticSrc))
+          ? sec.staticSrc
+          : path.join(MENU_DIR, sec.file);
 
         if (!fs.existsSync(imgPath)) {
           console.warn(`[imenu] Missing image: ${imgPath}`);
@@ -297,7 +300,10 @@ module.exports = {
         // Skip corrupt/invalid files (e.g. API error pages saved as jpg)
         if (!isValidJpeg(imgPath)) {
           console.warn(`[imenu] Invalid JPEG, skipping: ${imgPath} — run .imrefresh to redownload`);
-          try { fs.unlinkSync(imgPath); } catch {}
+          // Don't delete static source files
+          if (!sec.staticSrc || imgPath !== sec.staticSrc) {
+            try { fs.unlinkSync(imgPath); } catch {}
+          }
           continue;
         }
 
@@ -397,7 +403,9 @@ module.exports = {
       try {
         for (let i = 0; i < SECTIONS.length; i++) {
           const sec = SECTIONS[i];
-          const imgPath = path.join(MENU_DIR, sec.file);
+          const imgPath = (sec.staticSrc && fs.existsSync(sec.staticSrc))
+              ? sec.staticSrc
+              : path.join(MENU_DIR, sec.file);
           if (!fs.existsSync(imgPath)) continue;
           const imgBuf = fs.readFileSync(imgPath);
           await new Promise(r => setTimeout(r, 300));

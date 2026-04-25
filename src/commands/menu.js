@@ -249,6 +249,8 @@ const subMenus = {
       ['.imgpdf',       'Image to PDF'],
       ['.topdf',        'Convert to PDF'],
       ['.toqr',         'Text to QR Code'],
+      ['.imagetolink',  'Image to Direct Link'],
+      ['.imglink',      'Image Link (Alt)'],
     ],
   },
 
@@ -315,6 +317,7 @@ const subMenus = {
       ['.tts',         'Text to Speech'],
       ['.tr',          'Translate'],
       ['.qr',          'QR Code Generator'],
+      ['.qrlink',      'QR Code to Link'],
       ['.calc',        'Calculator'],
       ['.weather',     'Weather Info'],
       ['.shorturl',    'URL Shortener'],
