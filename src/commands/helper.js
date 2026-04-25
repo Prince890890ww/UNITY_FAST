@@ -295,7 +295,8 @@ async function sendButtons(sock, jid, { text, footer = '', buttons = [], quoted 
     if (!global.lastButtonMsg) global.lastButtonMsg = new Map();
     // Collect any related messages (neko image etc.) tracked before this button send
     const relatedKeys = global.lastButtonMsgRelated?.get(jid) || [];
-    global.lastButtonMsg.set(jid, { buttonKey: msg.key, relatedKeys });
+    const _myBotJid = (sock.user?.id || '').split(':')[0] + '@s.whatsapp.net';
+    global.lastButtonMsg.set(jid, { buttonKey: msg.key, relatedKeys, botJid: _myBotJid });
     // Clear related tracker now that they're linked to this button message
     if (global.lastButtonMsgRelated) global.lastButtonMsgRelated.delete(jid);
   }

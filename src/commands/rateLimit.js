@@ -42,6 +42,32 @@ function getCooldownRemaining(jid, cmd) {
   return remaining > 0 ? remaining : 0;
 }
 
+// ── Command flood detection (anti-stuck / server-kill attack) ────
+// Same JID sending >8 commands in 10s → 30-min temp ban
+const _floodMap = new Map(); // jid → [timestamps]
+const _tempBan  = new Map(); // jid → ban_until_timestamp
+const FLOOD_WIN = 10 * 1000;       // 10s window
+const FLOOD_MAX = 8;               // max 8 commands in 10s
+const BAN_DUR   = 30 * 60 * 1000; // 30 min
+
+function isCommandFlooding(jid) {
+  const now = Date.now();
+  const bannedUntil = _tempBan.get(jid);
+  if (bannedUntil) {
+    if (now < bannedUntil) return true;
+    _tempBan.delete(jid); // ban expired
+  }
+  const hits = (_floodMap.get(jid) || []).filter(t => now - t < FLOOD_WIN);
+  hits.push(now);
+  _floodMap.set(jid, hits);
+  if (hits.length > FLOOD_MAX) {
+    _tempBan.set(jid, now + BAN_DUR);
+    _floodMap.delete(jid);
+    return true;
+  }
+  return false;
+}
+
 // ── Cleanup every 5 minutes ───────────────────────────────────
 setInterval(() => {
   const now = Date.now();
@@ -62,4 +88,5 @@ module.exports = {
   setCooldown,
   isOnCooldown,
   getCooldownRemaining,
+  isCommandFlooding,
 };
