@@ -8,7 +8,8 @@ const {
   makeCacheableSignalKeyStore,
   proto,
   generateWAMessageFromContent,
-, Browsers } = require('@whiskeysockets/baileys');
+  prepareWAMessageMedia,
+  Browsers } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const chalk = require('chalk');
@@ -45,16 +46,13 @@ const MAX_RETRIES = 10;
 let pairingStarted = false;
 let pairingInterval = null;
 
-global.UNITY_THUMB = './src/media/unity_thumb.jpg';
+global.UNITY_THUMB = 'https://qu.ax/x/3Qgql.jpg';
 global.sendThumb = async (sock, jid, text, quoted = null) => {
   try {
-    if (fs.existsSync(global.UNITY_THUMB)) {
-      const thumb = await fs.readFile(global.UNITY_THUMB);
-      return await sock.sendMessage(jid,
-        { image: thumb, caption: text },
-        quoted ? { quoted } : {}
-      );
-    }
+    return await sock.sendMessage(jid,
+      { image: { url: global.UNITY_THUMB }, caption: text },
+      quoted ? { quoted } : {}
+    );
   } catch (e) {}
   return sock.sendMessage(jid, { text }, quoted ? { quoted } : {});
 };
@@ -234,39 +232,44 @@ async function connectToWhatsApp() {
             `🧲 _UNITY-MD is fully loaded and ready to serve!_\n\n` +
             `${cfg.footer}`;
 
-        // ── Startup message → own inbox (image + audio) ──────────
+        // ── Startup message → own inbox (image + message + YouTube button all together + audio) ──
         setImmediate(async () => {
           try {
             const selfJid = sock.user?.id?.replace(/:[0-9]+@/, '@') || `${num}@s.whatsapp.net`;
-            const thumbPath = require('path').join(__dirname, 'src/media/unity_thumb.jpg');
+            const THUMB_URL = 'https://qu.ax/x/3Qgql.jpg';
+            const AUDIO_URL = 'https://www.image2url.com/r2/default/audio/1776957022770-98aea04d-2005-48b7-8bec-cc060ae20da9.mp3';
 
-            // 1) Send image with caption
-            if (fs.existsSync(thumbPath)) {
-              const thumb = await fs.readFile(thumbPath);
-              await sock.sendMessage(selfJid, { image: thumb, caption: onlineMsg }).catch(() => {});
-            } else {
-              await sock.sendMessage(selfJid, { text: onlineMsg }).catch(() => {});
-            }
+            // Helper: download image buffer from URL
+            const fetchBuf = (url) => new Promise((res, rej) => {
+              const mod = url.startsWith('https') ? require('https') : require('http');
+              mod.get(url, (r) => {
+                const c = [];
+                r.on('data', d => c.push(d));
+                r.on('end', () => res(Buffer.concat(c)));
+                r.on('error', rej);
+              }).on('error', rej);
+            });
 
-            // 2) Send voice note
-            await sock.sendMessage(selfJid, {
-              audio: { url: 'https://www.image2url.com/r2/default/audio/1776957022770-98aea04d-2005-48b7-8bec-cc060ae20da9.mp3' },
-              mimetype: 'audio/mp4',
-              ptt: true,
-            }).catch(() => {});
-
-            // 3) YouTube subscribe button (inline build — no helper dependency)
+            // 1) Upload image → build interactiveMessage with image header + body text + YouTube button
             try {
-              const ytMsg = await generateWAMessageFromContent(selfJid, {
+              const imgBuf = await fetchBuf(THUMB_URL);
+              const uploaded = await prepareWAMessageMedia(
+                { image: imgBuf },
+                { upload: sock.waUploadToServer }
+              );
+              const startupMsg = await generateWAMessageFromContent(selfJid, {
                 viewOnceMessage: {
                   message: {
                     messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
                     interactiveMessage: proto.Message.InteractiveMessage.create({
+                      header: proto.Message.InteractiveMessage.Header.create({
+                        hasMediaAttachment: true,
+                        imageMessage: uploaded.imageMessage,
+                      }),
                       body: proto.Message.InteractiveMessage.Body.create({
-                        text: `🎬 *Subscribe to our YouTube channel!*\n\nStay updated with latest tutorials & updates from *UNITY TEAM* 🧲`,
+                        text: onlineMsg,
                       }),
                       footer: proto.Message.InteractiveMessage.Footer.create({ text: cfg.footer }),
-                      header: proto.Message.InteractiveMessage.Header.create({ hasMediaAttachment: false }),
                       nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
                         buttons: [{
                           name: 'cta_url',
@@ -281,11 +284,24 @@ async function connectToWhatsApp() {
                   },
                 },
               }, {});
-              await sock.relayMessage(ytMsg.key.remoteJid, ytMsg.message, {
-                messageId: ytMsg.key.id,
+              await sock.relayMessage(startupMsg.key.remoteJid, startupMsg.message, {
+                messageId: startupMsg.key.id,
                 additionalNodes: [{ tag: 'biz', attrs: {}, content: [{ tag: 'interactive', attrs: { type: 'native_flow', v: '1' }, content: [{ tag: 'native_flow', attrs: { v: '9', name: 'mixed' } }] }] }],
               });
-            } catch (_btn) {}
+            } catch (_e) {
+              // Fallback: plain image + caption
+              await sock.sendMessage(selfJid, {
+                image: { url: THUMB_URL },
+                caption: onlineMsg,
+              }).catch(() => {});
+            }
+
+            // 2) Send MP3
+            await sock.sendMessage(selfJid, {
+              audio: { url: AUDIO_URL },
+              mimetype: 'audio/mp4',
+              ptt: true,
+            }).catch(() => {});
 
           } catch (_e) {}
         });
