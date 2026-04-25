@@ -712,12 +712,13 @@ const _unityExtra = {
       try {
         const _p = require('path');
         const _fs2 = require('fs-extra');
-        const _u = require('url');
         const thumbPath = _p.join(__dirname, '../media/unity_thumb.jpg');
-        global._cmdPoolImage = _fs2.existsSync(thumbPath)
-          ? { url: _u.pathToFileURL(thumbPath).href }
-          : { url: 'https://qu.ax/x/3Qgql.jpg' };
-      } catch { global._cmdPoolImage = { url: 'https://qu.ax/x/3Qgql.jpg' }; }
+        if (_fs2.existsSync(thumbPath)) {
+          global._cmdPoolImage = { stream: _fs2.createReadStream(thumbPath) };
+        } else {
+          global._cmdPoolImage = { url: 'https://raw.githubusercontent.com/nima-axis/UNITY_FAST/refs/heads/main/src/media/unity_thumb.jpg' };
+        }
+      } catch { global._cmdPoolImage = null; }
       const _repoResult = await sendButtons2(sock, chat, {
         text: repoText,
         footer: cfg2.footer,

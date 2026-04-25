@@ -711,10 +711,12 @@ module.exports = {
     const _prevPoolImage = global._cmdPoolImage;
     try {
       const thumbPath = require('path').join(__dirname, '../media/unity_thumb.jpg');
-      global._cmdPoolImage = fs.existsSync(thumbPath)
-        ? { url: require('url').pathToFileURL(thumbPath).href }
-        : { url: 'https://qu.ax/x/3Qgql.jpg' };
-    } catch { global._cmdPoolImage = { url: 'https://qu.ax/x/3Qgql.jpg' }; }
+      if (fs.existsSync(thumbPath)) {
+        global._cmdPoolImage = { stream: fs.createReadStream(thumbPath) };
+      } else {
+        global._cmdPoolImage = { url: 'https://raw.githubusercontent.com/nima-axis/UNITY_FAST/refs/heads/main/src/media/unity_thumb.jpg' };
+      }
+    } catch { global._cmdPoolImage = null; }
 
     const r1 = await sendButtons(sock, chat, {
       text: mainText + '\n\n' + tr('menu_select_cat'),
