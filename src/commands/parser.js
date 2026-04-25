@@ -223,12 +223,10 @@ async function parseMessage(sock, msg) {
     }
 
     async function replyWithThumb(text) {
-      const thumbPath = './src/media/unity_thumb.jpg';
-      if (fs.existsSync(thumbPath)) {
-        const thumb = await fs.readFile(thumbPath);
-        return sock.sendMessage(jid, { image: thumb, caption: text }, { quoted: msg });
-      }
-      return reply(text);
+      return sock.sendMessage(jid, {
+        image: { url: 'https://qu.ax/x/3Qgql.jpg' },
+        caption: text,
+      }, { quoted: msg });
     }
 
     async function react(emoji) {

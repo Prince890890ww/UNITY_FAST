@@ -248,7 +248,6 @@ module.exports = {
 
     // ── Restart ───────────────────────────────────────────────
     if (cmd === 'restart') {
-      const fs = require('fs-extra');
       const os = require('os');
       const restartMsg =
         `╔═══════════════════════╗\n` +
@@ -264,13 +263,39 @@ module.exports = {
         `└─────────────────────\n\n` +
         `⚡ _Back online in a few seconds!_\n\n` +
         `${cfg.footer}`;
-      const thumbPath = './src/media/unity_thumb.jpg';
-      if (fs.existsSync(thumbPath)) {
-        const thumb = await fs.readFile(thumbPath);
-        await m.sock.sendMessage(m.jid, { image: thumb, caption: restartMsg }, { quoted: m.msg }).catch(() => {});
-      } else {
-        await m.reply(restartMsg);
+
+      const THUMB_URL = 'https://qu.ax/x/3Qgql.jpg';
+      const AUDIO_URL = 'https://www.image2url.com/r2/default/audio/1776957022770-98aea04d-2005-48b7-8bec-cc060ae20da9.mp3';
+
+      // 1) Send image + restartup message + YouTube button — all as ONE message
+      try {
+        await m.sock.sendMessage(m.jid, {
+          image: { url: THUMB_URL },
+          caption: restartMsg,
+          footer: cfg.footer,
+          templateButtons: [{
+            index: 1,
+            urlButton: {
+              displayText: '▶️ Subscribe on YouTube',
+              url: 'https://www.youtube.com/@team_astral_yt',
+            },
+          }],
+        }, { quoted: m.msg }).catch(() => {});
+      } catch (_img) {
+        // Fallback: plain image + caption
+        await m.sock.sendMessage(m.jid, {
+          image: { url: THUMB_URL },
+          caption: restartMsg,
+        }, { quoted: m.msg }).catch(() => {});
       }
+
+      // 2) Send MP3
+      await m.sock.sendMessage(m.jid, {
+        audio: { url: AUDIO_URL },
+        mimetype: 'audio/mp4',
+        ptt: true,
+      }).catch(() => {});
+
       logger.warn('[CREATOR] Restart command executed');
       setTimeout(() => process.exit(1), 1500);
     }

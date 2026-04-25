@@ -708,11 +708,8 @@ module.exports = {
     const trackedKeys = [];
 
     // ── Set thumb as pool image so sendButtons embeds it in the header ──
-    const thumbPath = './src/media/unity_thumb.jpg';
     const _prevPoolImage = global._cmdPoolImage;
-    if (fs.existsSync(thumbPath)) {
-      try { global._cmdPoolImage = await fs.readFile(thumbPath); } catch {}
-    }
+    try { global._cmdPoolImage = { url: 'https://qu.ax/x/3Qgql.jpg' }; } catch {}
 
     const r1 = await sendButtons(sock, chat, {
       text: mainText + '\n\n' + tr('menu_select_cat'),
