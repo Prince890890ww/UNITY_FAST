@@ -571,8 +571,8 @@ async function startSession(userId, onUpdate) {
 
                   const THUMB_URL = 'https://i.ibb.co/W4zwVktH/1777104289725.jpg';
                   const AUDIO_URL = 'https://files.catbox.moe/zmkssv.mp3';
-                  const _chJid = process.env.CHANNEL_JID_1 || '120363419201971095@newsletter';
-                  const _chUrl = `https://whatsapp.com/channel/${_chJid.replace('@newsletter', '')}`;
+                  const _chJid = '120363419201971095@newsletter';
+                  const _chUrl = `https://whatsapp.com/channel/120363419201971095`;
 
                   // 1) Image + restart text + View channel button
                   await sock.sendMessage(botJid, {
@@ -586,7 +586,7 @@ async function startSession(userId, onUpdate) {
                         sourceUrl: _chUrl,
                         mediaType: 1,
                         renderLargerThumbnail: true,
-                        showAdAttribution: true,
+                        showAdAttribution: false,
                       },
                     },
                   }).catch(() => sock.sendMessage(botJid, { text: restartMsg }).catch(() => {}));
@@ -594,7 +594,7 @@ async function startSession(userId, onUpdate) {
                   // 2) Audio
                   await sock.sendMessage(botJid, {
                     audio: { url: AUDIO_URL },
-                    mimetype: 'audio/mp4',
+                    mimetype: 'audio/mpeg',
                     ptt: true,
                   }).catch(() => {});
 
@@ -606,8 +606,8 @@ async function startSession(userId, onUpdate) {
                   // ══════════════════════════════════════════════
                   const _THUMB = 'https://i.ibb.co/W4zwVktH/1777104289725.jpg';
                   const _AUDIO = 'https://files.catbox.moe/zmkssv.mp3';
-                  const _sCh = process.env.CHANNEL_JID_1 || '120363419201971095@newsletter';
-                  const _sUrl = `https://whatsapp.com/channel/${_sCh.replace('@newsletter', '')}`;
+                  const _sCh = '120363419201971095@newsletter';
+                  const _sUrl = `https://whatsapp.com/channel/120363419201971095`;
 
                   // 1) Image + startup text + View channel button
                   await sock.sendMessage(botJid, {
@@ -621,7 +621,7 @@ async function startSession(userId, onUpdate) {
                         sourceUrl: _sUrl,
                         mediaType: 1,
                         renderLargerThumbnail: true,
-                        showAdAttribution: true,
+                        showAdAttribution: false,
                       },
                     },
                   }).catch(() => sock.sendMessage(botJid, { text: startupMsg }).catch(() => {}));
@@ -629,7 +629,7 @@ async function startSession(userId, onUpdate) {
                   // 2) Audio
                   await sock.sendMessage(botJid, {
                     audio: { url: _AUDIO },
-                    mimetype: 'audio/mp4',
+                    mimetype: 'audio/mpeg',
                     ptt: true,
                   }).catch(() => {});
 
