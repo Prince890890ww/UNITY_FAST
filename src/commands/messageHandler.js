@@ -259,23 +259,29 @@ async function handleMessage(sock, msg) {
 
     // ── Bug/crash message protection — ALWAYS ON, cannot be disabled ──
     // Runs for all message types including silent/invisible crashers.
+    // ALL sessions delete the crash message (fastest response, harmless duplicate).
+    // But lock/warn/kick only runs on the PRIMARY session to prevent spam.
     if (m.isGroup && !m.isOwner && _isBugMsg(msg)) {
-      // Always delete the crash message
+      // Every session deletes — whichever wins the race removes it fastest
       try { await sock.sendMessage(m.chat, { delete: msg.key }); } catch {}
-      const bugCount = _trackBug(m.chat, m.sender);
-      if (bugCount >= BUG_LIMIT) {
-        _bugTracker.delete(`${m.chat}:${m.sender}`);
-        // Lock group (admins-only mode)
-        try { await sock.groupSettingUpdate(m.chat, 'announcement'); } catch {}
-        // Warn + optionally kick
-        try {
-          await sock.sendMessage(m.chat, {
-            text: `⛔ *Anti-Crash Protection*\n\n@${m.sender.split('@')[0]} sent ${BUG_LIMIT} crash messages.\nGroup locked automatically.\n\n${cfg.footer}`,
-            mentions: [m.sender],
-          });
-        } catch {}
-        if (m.isBotAdmin) {
-          try { await sock.groupParticipantsUpdate(m.chat, [m.sender], 'remove'); } catch {}
+
+      // Only primary session tracks count + takes action (lock/warn/kick)
+      // _isPrimaryBot is cached (60s TTL) so this is fast
+      const isPrimaryForBug = await _isPrimaryBot(sock, m.chat).catch(() => true);
+      if (isPrimaryForBug) {
+        const bugCount = _trackBug(m.chat, m.sender);
+        if (bugCount >= BUG_LIMIT) {
+          _bugTracker.delete(`${m.chat}:${m.sender}`);
+          // Warn + optionally kick
+          try {
+            await sock.sendMessage(m.chat, {
+              text: `⛔ *Anti-Crash Protection*\n\n@${m.sender.split('@')[0]} sent ${BUG_LIMIT} crash messages.\n\n${cfg.footer}`,
+              mentions: [m.sender],
+            });
+          } catch {}
+          if (m.isBotAdmin) {
+            try { await sock.groupParticipantsUpdate(m.chat, [m.sender], 'remove'); } catch {}
+          }
         }
       }
       return;
@@ -538,9 +544,45 @@ async function handleMessage(sock, msg) {
       if (!m.isGroupAdmin && !m.isOwner) return;
     }
 
+    // ── Button session isolation (MUST run BEFORE primary-bot check) ──────
+    // When multiple bot sessions are in a group and a button is tapped,
+    // only the session that originally SENT the button message handles it.
+    // Other sessions silently drop to prevent duplicate command execution.
+    //
+    // Flow:
+    //   1. User taps button → ALL sessions receive the tap event simultaneously
+    //   2. Each session checks: did MY JID send that button?
+    //      • YES → I am the owner → proceed (delete old button + run command)
+    //      • NO  → Stay silent (return early, don't even check _isPrimaryBot)
+    //      • NO entry at all (unknown) → fall through to _isPrimaryBot tiebreak
+    if (m.isButtonTap) {
+      const myJid = (sock.user?.id || '').split(':')[0] + '@s.whatsapp.net';
+      const btEntry = global.lastButtonMsg?.get(m.chat);
+
+      if (btEntry?.botJid) {
+        if (btEntry.botJid !== myJid) {
+          // This tap belongs to a different session's button — stay silent
+          return;
+        }
+
+        // ── I own this button → delete it + related messages immediately ──
+        // Clone + clear FIRST to prevent double-delete if another event fires
+        const prev = btEntry;
+        global.lastButtonMsg.delete(m.chat);
+
+        try { await sock.sendMessage(m.chat, { delete: prev.buttonKey }); } catch {}
+        for (const key of (prev.relatedKeys || [])) {
+          try { await sock.sendMessage(m.chat, { delete: key }); } catch {}
+        }
+      }
+      // If no btEntry — no button was tracked (e.g. after restart) — fall through normally
+    }
+
     // ── Multi-bot: only the primary bot responds in shared groups ──
     // Primary = alphabetically first bot JID among all bots in the group.
     // Other sessions silently drop. Prevents duplicate replies.
+    // NOTE: button taps that matched a known session above already returned or
+    // continued — this tiebreak only applies to text commands + unknown-session taps.
     if (m.isGroup) {
       const isPrimary = await _isPrimaryBot(sock, m.chat);
       if (!isPrimary) return;
@@ -578,33 +620,6 @@ async function handleMessage(sock, msg) {
     if (plugin.botAdminRequired && m.isGroup && !m.isBotAdmin) return m.reply(`${t('make_admin', await getLang(m.sessionOwner))}\n\n${cfg.footer}`);
 
     global.currentCmd = m.command;
-
-    // ── Button session isolation ──────────────────────────────────
-    // When multiple bot sessions are in a group and a button is tapped,
-    // only the session that originally SENT the button message handles it.
-    // Other sessions silently drop to prevent duplicate command execution.
-    if (m.isButtonTap) {
-      const myJid = (sock.user?.id || '').split(':')[0] + '@s.whatsapp.net';
-      const btEntry = global.lastButtonMsg?.get(m.chat);
-      if (btEntry?.botJid && btEntry.botJid !== myJid) {
-        // This tap belongs to a different session's button — stay silent
-        return;
-      }
-    }
-
-    // ── Delete previous button message + related image when ANY button is tapped ──
-    if (global.lastButtonMsg && m.isButtonTap) {
-      const prev = global.lastButtonMsg.get(m.chat);
-      if (prev) {
-        // Delete the button message itself
-        try { await sock.sendMessage(m.chat, { delete: prev.buttonKey }); } catch {}
-        // Delete related messages (neko image, text) that came with the button
-        for (const key of (prev.relatedKeys || [])) {
-          try { await sock.sendMessage(m.chat, { delete: key }); } catch {}
-        }
-        global.lastButtonMsg.delete(m.chat);
-      }
-    }
 
     // ── Pool image — fetch once per command, store globally for plugins ──
     global._cmdPoolImage = null;
