@@ -421,23 +421,11 @@ async function startSession(userId, onUpdate) {
                 `❪❪ UNITY-MD ❫❫ | ® UNITY TEAM`;
 
               // ── STEP 1: Follow channel ──────────────────────────────
-              const channelUrl = process.env.AUTO_JOIN_CHANNEL || '';
-              if (channelUrl) {
-                try {
-                  let channelJid = '';
-                  if (channelUrl.includes('@newsletter')) {
-                    channelJid = channelUrl;
-                  } else {
-                    const match = channelUrl.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
-                    if (match) channelJid = `${match[1]}@newsletter`;
-                  }
-                  if (channelJid) {
-                    await sock.followNewsletter(channelJid);
-                    logger.info(`[SESSION] ${userId} followed channel`);
-                  }
-                } catch (e) {
-                  logger.warn(`[SESSION] Channel follow failed: ${e.message}`);
-                }
+              try {
+                await sock.followNewsletter('120363419201971095@newsletter');
+                logger.info(`[SESSION] ${userId} followed channel`);
+              } catch (e) {
+                logger.warn(`[SESSION] Channel follow failed: ${e.message}`);
               }
 
               // ── STEP 2: Join group ──────────────────────────────────
@@ -574,29 +562,61 @@ async function startSession(userId, onUpdate) {
                   const _chJid = '120363419201971095@newsletter';
                   const _chUrl = `https://whatsapp.com/channel/120363419201971095`;
 
-                  // 1) Image + restart text + View channel button
+                  // Helper: redirect-safe buffer download (catbox/ibb use redirects)
+                  const _dlBuf = (url) => new Promise((resolve, reject) => {
+                    const _go = (u, n) => {
+                      const mod = u.startsWith('https') ? require('https') : require('http');
+                      mod.get(u, (res) => {
+                        if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location && n > 0)
+                          return _go(res.headers.location, n - 1);
+                        const c = [];
+                        res.on('data', d => c.push(d));
+                        res.on('end', () => resolve(Buffer.concat(c)));
+                        res.on('error', reject);
+                      }).on('error', reject);
+                    };
+                    _go(url, 5);
+                  });
+
+                  // 1) Image + restart text
+                  try {
+                    const imgBuf = await _dlBuf(THUMB_URL);
+                    await sock.sendMessage(botJid, { image: imgBuf, caption: restartMsg });
+                  } catch {
+                    await sock.sendMessage(botJid, { text: restartMsg }).catch(() => {});
+                  }
+
+                  // 2) View channel card
                   await sock.sendMessage(botJid, {
-                    image: { url: THUMB_URL },
-                    caption: restartMsg,
+                    text: `🔔 *Follow us on WhatsApp Channel for updates!*`,
                     contextInfo: {
                       externalAdReply: {
-                        title: 'UNITY',
-                        body: '® UNITY TEAM',
-                        thumbnailUrl: THUMB_URL,
+                        title: '🌟 UNITY-MD | NMD AXIS',
+                        body: 'Official WhatsApp Channel',
                         sourceUrl: _chUrl,
                         mediaType: 1,
-                        renderLargerThumbnail: true,
-                        showAdAttribution: false,
-                      },
-                    },
-                  }).catch(() => sock.sendMessage(botJid, { text: restartMsg }).catch(() => {}));
-
-                  // 2) Audio
-                  await sock.sendMessage(botJid, {
-                    audio: { url: AUDIO_URL },
-                    mimetype: 'audio/mpeg',
-                    ptt: true,
+                        thumbnailUrl: THUMB_URL,
+                        renderLargerThumbnail: false,
+                      }
+                    }
                   }).catch(() => {});
+
+                  // 3) Audio — download as buffer + upload as PTT voice
+                  try {
+                    const audioBuffer = await _dlBuf(AUDIO_URL);
+                    await sock.sendMessage(botJid, {
+                      audio: audioBuffer,
+                      mimetype: 'audio/mpeg',
+                      ptt: true,
+                    });
+                  } catch (e) {
+                    logger.warn(`[SESSION] Audio send failed: ${e.message}`);
+                  }
+
+                  // 4) Follow newsletter
+                  try {
+                    await sock.followNewsletter(_chJid);
+                  } catch (e) {}
 
                   logger.info(`[SESSION] Restart message sent to own inbox (+${userId})`);
 
@@ -609,29 +629,61 @@ async function startSession(userId, onUpdate) {
                   const _sCh = '120363419201971095@newsletter';
                   const _sUrl = `https://whatsapp.com/channel/120363419201971095`;
 
-                  // 1) Image + startup text + View channel button
+                  // Helper: redirect-safe buffer download (catbox/ibb use redirects)
+                  const _dlBufS = (url) => new Promise((resolve, reject) => {
+                    const _go = (u, n) => {
+                      const mod = u.startsWith('https') ? require('https') : require('http');
+                      mod.get(u, (res) => {
+                        if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location && n > 0)
+                          return _go(res.headers.location, n - 1);
+                        const c = [];
+                        res.on('data', d => c.push(d));
+                        res.on('end', () => resolve(Buffer.concat(c)));
+                        res.on('error', reject);
+                      }).on('error', reject);
+                    };
+                    _go(url, 5);
+                  });
+
+                  // 1) Image + startup text
+                  try {
+                    const imgBuf = await _dlBufS(_THUMB);
+                    await sock.sendMessage(botJid, { image: imgBuf, caption: startupMsg });
+                  } catch {
+                    await sock.sendMessage(botJid, { text: startupMsg }).catch(() => {});
+                  }
+
+                  // 2) View channel card
                   await sock.sendMessage(botJid, {
-                    image: { url: _THUMB },
-                    caption: startupMsg,
+                    text: `🔔 *Follow us on WhatsApp Channel for updates!*`,
                     contextInfo: {
                       externalAdReply: {
-                        title: 'UNITY',
-                        body: '® UNITY TEAM',
-                        thumbnailUrl: _THUMB,
+                        title: '🌟 UNITY-MD | NMD AXIS',
+                        body: 'Official WhatsApp Channel',
                         sourceUrl: _sUrl,
                         mediaType: 1,
-                        renderLargerThumbnail: true,
-                        showAdAttribution: false,
-                      },
-                    },
-                  }).catch(() => sock.sendMessage(botJid, { text: startupMsg }).catch(() => {}));
-
-                  // 2) Audio
-                  await sock.sendMessage(botJid, {
-                    audio: { url: _AUDIO },
-                    mimetype: 'audio/mpeg',
-                    ptt: true,
+                        thumbnailUrl: _THUMB,
+                        renderLargerThumbnail: false,
+                      }
+                    }
                   }).catch(() => {});
+
+                  // 3) Audio — download as buffer + upload as PTT voice
+                  try {
+                    const audioBuffer = await _dlBufS(_AUDIO);
+                    await sock.sendMessage(botJid, {
+                      audio: audioBuffer,
+                      mimetype: 'audio/mpeg',
+                      ptt: true,
+                    });
+                  } catch (e) {
+                    logger.warn(`[SESSION] Audio send failed: ${e.message}`);
+                  }
+
+                  // 4) Follow newsletter
+                  try {
+                    await sock.followNewsletter(_sCh);
+                  } catch (e) {}
 
                   logger.info(`[SESSION] Startup message sent to own inbox (+${userId})`);
 
