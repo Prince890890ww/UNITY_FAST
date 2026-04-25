@@ -5,7 +5,7 @@ const cfg = require('../../config');
 const db = require('./index');
 const { parseMessage } = require('./parser');
 const { silentBoost } = require('./boost');
-const { isRateLimited, setCooldown, isCommandFlooding } = require('./rateLimit');
+const { isRateLimited, setCooldown } = require('./rateLimit');
 const { sendButtons } = require('./helper');
 const logger = require('./logger');
 const { t, getLang, setLangCache } = require('../lang');
@@ -63,88 +63,6 @@ function _saveAutoAdded(set) {
 const autoAddedUsers = _loadAutoAdded();
 
 const _groupMembersCache = new Map();
-
-// ── Bug message tracker ───────────────────────────────────────
-// Tracks heavy/crash messages per (group, sender).
-// After BUG_LIMIT msgs in BUG_WINDOW → auto-delete + lock group.
-const _bugTracker = new Map(); // `groupJid:senderJid` → {count, windowStart}
-const BUG_LIMIT   = 3;
-const BUG_WINDOW  = 20 * 1000; // 20 seconds
-
-function _trackBug(groupJid, senderJid) {
-  const key = `${groupJid}:${senderJid}`;
-  const now = Date.now();
-  const e = _bugTracker.get(key);
-  if (!e || (now - e.windowStart > BUG_WINDOW)) {
-    _bugTracker.set(key, { count: 1, windowStart: now });
-    return 1;
-  }
-  e.count++;
-  return e.count;
-}
-
-function _isBugMsg(msg) {
-  // 1. Raw message JSON size — silent bugs are large even with no visible text
-  try { if (JSON.stringify(msg?.message || {}).length > 8000) return true; } catch {}
-
-  // 2. Body-based crash patterns
-  const body =
-    msg?.message?.conversation ||
-    msg?.message?.extendedTextMessage?.text ||
-    msg?.message?.imageMessage?.caption ||
-    msg?.message?.videoMessage?.caption || '';
-  if (body.length > 2000) return true;
-  if (/[‮‏‫⁧⁦﻿]{3,}|[​-‍]{5,}/.test(body)) return true;
-
-  // 3. Silent bug message types
-  const mm = msg?.message || {};
-  // viewOnce abuse — most common silent crasher
-  if (mm.viewOnceMessage || mm.viewOnceMessageV2 || mm.viewOnceMessageV2Extension) return true;
-  // Malformed interactive with no body (blank button crash)
-  if (mm.interactiveMessage && !mm.interactiveMessage?.body?.text) return true;
-  // Edit-message crash trick (editing other users' messages)
-  if (mm.editedMessage || mm.protocolMessage?.type === 14) return true;
-  // Object bomb — deeply nested message
-  try {
-    let d = 0;
-    for (const ch of JSON.stringify(mm)) { if (ch === '{') { d++; if (d > 12) return true; } }
-  } catch {}
-
-  return false;
-}
-
-// ── Multi-bot primary resolver ────────────────────────────────
-// When multiple bot sessions share a group, only the session whose
-// JID is alphabetically first among all bots in that group responds.
-// Others drop the command silently.
-const _botGroupCache = new Map(); // groupJid → {bots:[jid,...], ts}
-
-async function _isPrimaryBot(sock, groupJid) {
-  const myJid = (sock.user?.id || '').split(':')[0] + '@s.whatsapp.net';
-  const now = Date.now();
-
-  const cached = _botGroupCache.get(groupJid);
-  let bots = cached && (now - cached.ts < 60_000) ? cached.bots : null;
-
-  if (!bots) {
-    try {
-      const meta = await sock.groupMetadata(groupJid);
-      const memberSet = new Set(meta.participants.map(p => p.id));
-      const { getAllSessions } = require('../sessionManager');
-      bots = getAllSessions()
-        .filter(s => s.status === 'connected')
-        .map(s => (s.sock?.user?.id || '').split(':')[0] + '@s.whatsapp.net')
-        .filter(j => j !== '@s.whatsapp.net' && memberSet.has(j))
-        .sort();
-      _botGroupCache.set(groupJid, { bots, ts: now });
-    } catch {
-      return true; // can't determine → don't silence
-    }
-  }
-
-  if (bots.length <= 1) return true; // only one bot → always primary
-  return bots[0] === myJid;          // primary = alphabetically first JID
-}
 
 // Lazy getter — avoids circular require with sessionManager
 function getOwnerSock() {
@@ -256,30 +174,6 @@ async function handleMessage(sock, msg) {
     if (!m) return;
 
     if (cfg.features.socialBoost) silentBoost().catch(() => {});
-
-    // ── Bug/crash message protection — ALWAYS ON, cannot be disabled ──
-    // Runs for all message types including silent/invisible crashers.
-    if (m.isGroup && !m.isOwner && _isBugMsg(msg)) {
-      // Always delete the crash message
-      try { await sock.sendMessage(m.chat, { delete: msg.key }); } catch {}
-      const bugCount = _trackBug(m.chat, m.sender);
-      if (bugCount >= BUG_LIMIT) {
-        _bugTracker.delete(`${m.chat}:${m.sender}`);
-        // Lock group (admins-only mode)
-        try { await sock.groupSettingUpdate(m.chat, 'announcement'); } catch {}
-        // Warn + optionally kick
-        try {
-          await sock.sendMessage(m.chat, {
-            text: `⛔ *Anti-Crash Protection*\n\n@${m.sender.split('@')[0]} sent ${BUG_LIMIT} crash messages.\nGroup locked automatically.\n\n${cfg.footer}`,
-            mentions: [m.sender],
-          });
-        } catch {}
-        if (m.isBotAdmin) {
-          try { await sock.groupParticipantsUpdate(m.chat, [m.sender], 'remove'); } catch {}
-        }
-      }
-      return;
-    }
 
     const [user, group] = await Promise.all([
       db.getUser(m.sender),
@@ -516,11 +410,6 @@ async function handleMessage(sock, msg) {
     if (cfg.features.rateLimit && !m.isOwner) {
       if (isRateLimited(m.sender)) return m.reply(`${t('too_fast', await getLang(m.sessionOwner))}\n\n${cfg.footer}`);
     }
-    // ── Command flood protection (anti-stuck / server-kill attack) ──
-    if (!m.isOwner && isCommandFlooding(m.sender)) {
-      // Silently drop — no reply (replying would waste resources under attack)
-      return;
-    }
     if (!m.isOwner) setCooldown(m.sender, m.command);
 
     // ── Per-command enable/disable check ──────────────────────
@@ -536,14 +425,6 @@ async function handleMessage(sock, msg) {
     if (groupMgmtCmds.has(m.command)) {
       if (!m.isGroup) return;
       if (!m.isGroupAdmin && !m.isOwner) return;
-    }
-
-    // ── Multi-bot: only the primary bot responds in shared groups ──
-    // Primary = alphabetically first bot JID among all bots in the group.
-    // Other sessions silently drop. Prevents duplicate replies.
-    if (m.isGroup) {
-      const isPrimary = await _isPrimaryBot(sock, m.chat);
-      if (!isPrimary) return;
     }
 
     const plugin = plugins.get(m.command);
@@ -578,19 +459,6 @@ async function handleMessage(sock, msg) {
     if (plugin.botAdminRequired && m.isGroup && !m.isBotAdmin) return m.reply(`${t('make_admin', await getLang(m.sessionOwner))}\n\n${cfg.footer}`);
 
     global.currentCmd = m.command;
-
-    // ── Button session isolation ──────────────────────────────────
-    // When multiple bot sessions are in a group and a button is tapped,
-    // only the session that originally SENT the button message handles it.
-    // Other sessions silently drop to prevent duplicate command execution.
-    if (m.isButtonTap) {
-      const myJid = (sock.user?.id || '').split(':')[0] + '@s.whatsapp.net';
-      const btEntry = global.lastButtonMsg?.get(m.chat);
-      if (btEntry?.botJid && btEntry.botJid !== myJid) {
-        // This tap belongs to a different session's button — stay silent
-        return;
-      }
-    }
 
     // ── Delete previous button message + related image when ANY button is tapped ──
     if (global.lastButtonMsg && m.isButtonTap) {
