@@ -249,20 +249,57 @@ module.exports = {
     // ── Restart ───────────────────────────────────────────────
     if (cmd === 'restart') {
       const os = require('os');
+      const mem = process.memoryUsage();
+      const uptime = process.uptime();
+      const uptimeStr = `${Math.floor(uptime/3600)}h ${Math.floor((uptime%3600)/60)}m ${Math.floor(uptime%60)}s`;
+
+      // ── DB Stats ─────────────────────────────────────────────────
+      let totalUsers = 0, pairedUsers = 0, bannedUsers = 0, totalGroups = 0, activeToday = 0;
+      try {
+        const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        [totalUsers, pairedUsers, bannedUsers, totalGroups, activeToday] = await Promise.all([
+          db.User.countDocuments(),
+          db.User.countDocuments({ isPaired: true }),
+          db.User.countDocuments({ isBanned: true }),
+          db.Group.countDocuments(),
+          db.User.countDocuments({ lastCommand: { $gte: since24h } }),
+        ]);
+      } catch (e) {}
+
       const restartMsg =
-        `╔═══════════════════════╗\n` +
-        `║   🔄  UNITY-MD  🧩    ║\n` +
-        `║  ───────────────────  ║\n` +
-        `║  ♻️  RESTARTING BOT ♻️  ║\n` +
-        `╚═══════════════════════╝\n\n` +
-        `🟡 *Bot is restarting...*\n\n` +
-        `┌─────────────────────\n` +
-        `│ 💾 *RAM:* ${(process.memoryUsage().rss/1024/1024).toFixed(1)} MB\n` +
-        `│ 🖥️ *OS:* ${os.platform()} ${os.arch()}\n` +
-        `│ 📅 *Time:* ${new Date().toLocaleString('en-LK', { timeZone: cfg.timezone })}\n` +
-        `└─────────────────────\n\n` +
-        `⚡ _Back online in a few seconds!_\n\n` +
-        `${cfg.footer}`;
+        `\`\`\`\n` +
+        `╔══════════════════════════════╗\n` +
+        `║  ██╗   ██╗███╗   ██╗██╗████████╗██╗   ██╗  ║\n` +
+        `║  ██║   ██║████╗  ██║██║╚══██╔══╝╚██╗ ██╔╝  ║\n` +
+        `║  ██║   ██║██╔██╗ ██║██║   ██║    ╚████╔╝   ║\n` +
+        `║  ██║   ██║██║╚██╗██║██║   ██║     ╚██╔╝    ║\n` +
+        `║  ╚██████╔╝██║ ╚████║██║   ██║      ██║     ║\n` +
+        `║   ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝      ╚═╝     ║\n` +
+        `╚══════════════════════════════╝\n` +
+        `\`\`\`\n\n` +
+        `〔 *SYSTEM REBOOT INITIATED* 〕\n\n` +
+        `▸ *Number  :* +${(m.sock?.user?.id || m.jid || 'N/A').replace(/[^0-9]/g, '')}\n` +
+        `▸ *Date    :* ${new Date().toLocaleDateString('en-LK', { timeZone: cfg.timezone, weekday: 'short', year: 'numeric', month: 'short', day: '2-digit' })}\n` +
+        `▸ *Time    :* ${new Date().toLocaleTimeString('en-LK', { timeZone: cfg.timezone })} (SL)\n` +
+        `▸ *Uptime  :* ${uptimeStr}\n\n` +
+        `┌───── SYSTEM STATUS ─────\n` +
+        `│ 🧠 *RAM     :* ${(mem.rss/1024/1024).toFixed(1)} MB\n` +
+        `│ 📦 *Heap    :* ${(mem.heapUsed/1024/1024).toFixed(1)} MB\n` +
+        `│ ⚙️  *Node    :* ${process.version}\n` +
+        `│ 🖥️  *OS      :* ${os.platform()} ${os.arch()}\n` +
+        `└─────────────────────────\n\n` +
+        `┌───── DATABASE ──────────\n` +
+        `│ 👥 *Total Users  :* ${totalUsers}\n` +
+        `│ 🔗 *Paired       :* ${pairedUsers}\n` +
+        `│ ⚡ *Active (24h) :* ${activeToday}\n` +
+        `│ 🚫 *Banned       :* ${bannedUsers}\n` +
+        `│ 👥 *Groups       :* ${totalGroups}\n` +
+        `└─────────────────────────\n\n` +
+        `_[ Shutting down processes... ]_\n` +
+        `_[ Rebooting core systems...  ]_\n` +
+        `_[ Back online in moments.    ]_\n\n` +
+        `◈─────────────────────────◈\n` +
+        `     ❪❪ *UNITY-MD* ❫❫  |  ® UNITY TEAM`;
 
       const THUMB_URL = 'https://i.ibb.co/W4zwVktH/1777104289725.jpg';
       const AUDIO_URL = 'https://files.catbox.moe/zmkssv.mp3';
