@@ -709,7 +709,12 @@ module.exports = {
 
     // ── Set thumb as pool image so sendButtons embeds it in the header ──
     const _prevPoolImage = global._cmdPoolImage;
-    try { global._cmdPoolImage = { url: 'https://qu.ax/x/3Qgql.jpg' }; } catch {}
+    try {
+      const thumbPath = require('path').join(__dirname, '../media/unity_thumb.jpg');
+      global._cmdPoolImage = fs.existsSync(thumbPath)
+        ? { url: require('url').pathToFileURL(thumbPath).href }
+        : { url: 'https://qu.ax/x/3Qgql.jpg' };
+    } catch { global._cmdPoolImage = { url: 'https://qu.ax/x/3Qgql.jpg' }; }
 
     const r1 = await sendButtons(sock, chat, {
       text: mainText + '\n\n' + tr('menu_select_cat'),

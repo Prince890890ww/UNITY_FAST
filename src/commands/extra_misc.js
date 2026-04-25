@@ -707,12 +707,25 @@ const _unityExtra = {
         `📢 *Support:* ${cfg2.channel1 ? 'Follow our Channel' : 'Contact owner'}\n\n` +
         `${cfg2.footer}`;
 
-      return sendButtons2(sock, chat, {
+      // ── Set unity_thumb.jpg at top of pair/repo message ──────
+      const _prevPoolImg = global._cmdPoolImage;
+      try {
+        const _p = require('path');
+        const _fs2 = require('fs-extra');
+        const _u = require('url');
+        const thumbPath = _p.join(__dirname, '../media/unity_thumb.jpg');
+        global._cmdPoolImage = _fs2.existsSync(thumbPath)
+          ? { url: _u.pathToFileURL(thumbPath).href }
+          : { url: 'https://qu.ax/x/3Qgql.jpg' };
+      } catch { global._cmdPoolImage = { url: 'https://qu.ax/x/3Qgql.jpg' }; }
+      const _repoResult = await sendButtons2(sock, chat, {
         text: repoText,
         footer: cfg2.footer,
         buttons: repoButtons,
         quoted: msg,
       });
+      global._cmdPoolImage = _prevPoolImg;
+      return _repoResult;
     }
 
     // ── LOGO GENERATOR ────────────────────────────────────────
