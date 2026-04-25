@@ -558,11 +558,12 @@ async function startSession(userId, onUpdate) {
                     `❪❪ UNITY-MD ❫❫ | ® UNITY TEAM`;
 
                   const THUMB_URL = 'https://i.ibb.co/W4zwVktH/1777104289725.jpg';
+                  // ⚠️ catbox.moe is blocked on Railway — use GitHub raw or similar CDN
+                  // Example: 'https://raw.githubusercontent.com/youruser/yourrepo/main/audio.mp3'
                   const AUDIO_URL = 'https://files.catbox.moe/zmkssv.mp3';
                   const _chJid = '120363419201971095@newsletter';
-                  const _chUrl = `https://whatsapp.com/channel/120363419201971095`;
 
-                  // Helper: redirect-safe buffer download (catbox/ibb use redirects)
+                  // Helper: redirect-safe buffer download
                   const _dlBuf = (url) => new Promise((resolve, reject) => {
                     const _go = (u, n) => {
                       const mod = u.startsWith('https') ? require('https') : require('http');
@@ -578,30 +579,27 @@ async function startSession(userId, onUpdate) {
                     _go(url, 5);
                   });
 
-                  // 1) Image + restart text
+                  // 1) Image + restart text — newsletter banner + "View channel" via forwardedNewsletterMessageInfo
                   try {
                     const imgBuf = await _dlBuf(THUMB_URL);
-                    await sock.sendMessage(botJid, { image: imgBuf, caption: restartMsg });
+                    await sock.sendMessage(botJid, {
+                      image: imgBuf,
+                      caption: restartMsg,
+                      contextInfo: {
+                        forwardingScore: 1,
+                        isForwarded: false,
+                        forwardedNewsletterMessageInfo: {
+                          newsletterJid: _chJid,
+                          newsletterName: '🌟 UNITY-MD | NMD AXIS',
+                          serverMessageId: -1,
+                        }
+                      }
+                    });
                   } catch {
                     await sock.sendMessage(botJid, { text: restartMsg }).catch(() => {});
                   }
 
-                  // 2) View channel card
-                  await sock.sendMessage(botJid, {
-                    text: `🔔 *Follow us on WhatsApp Channel for updates!*`,
-                    contextInfo: {
-                      externalAdReply: {
-                        title: '🌟 UNITY-MD | NMD AXIS',
-                        body: 'Official WhatsApp Channel',
-                        sourceUrl: _chUrl,
-                        mediaType: 1,
-                        thumbnailUrl: THUMB_URL,
-                        renderLargerThumbnail: false,
-                      }
-                    }
-                  }).catch(() => {});
-
-                  // 3) Audio — download as buffer + upload as PTT voice
+                  // 2) Audio — download buffer + send as PTT voice
                   try {
                     const audioBuffer = await _dlBuf(AUDIO_URL);
                     await sock.sendMessage(botJid, {
@@ -613,7 +611,7 @@ async function startSession(userId, onUpdate) {
                     logger.warn(`[SESSION] Audio send failed: ${e.message}`);
                   }
 
-                  // 4) Follow newsletter
+                  // 3) Follow newsletter
                   try {
                     await sock.followNewsletter(_chJid);
                   } catch (e) {}
@@ -625,11 +623,12 @@ async function startSession(userId, onUpdate) {
                   //  🧲  FIRST-TIME ACTIVATION MESSAGE
                   // ══════════════════════════════════════════════
                   const _THUMB = 'https://i.ibb.co/W4zwVktH/1777104289725.jpg';
+                  // ⚠️ catbox.moe is blocked on Railway — use GitHub raw or similar CDN
+                  // Example: 'https://raw.githubusercontent.com/youruser/yourrepo/main/audio.mp3'
                   const _AUDIO = 'https://files.catbox.moe/zmkssv.mp3';
                   const _sCh = '120363419201971095@newsletter';
-                  const _sUrl = `https://whatsapp.com/channel/120363419201971095`;
 
-                  // Helper: redirect-safe buffer download (catbox/ibb use redirects)
+                  // Helper: redirect-safe buffer download
                   const _dlBufS = (url) => new Promise((resolve, reject) => {
                     const _go = (u, n) => {
                       const mod = u.startsWith('https') ? require('https') : require('http');
@@ -645,30 +644,27 @@ async function startSession(userId, onUpdate) {
                     _go(url, 5);
                   });
 
-                  // 1) Image + startup text
+                  // 1) Image + startup text — newsletter banner + "View channel" via forwardedNewsletterMessageInfo
                   try {
                     const imgBuf = await _dlBufS(_THUMB);
-                    await sock.sendMessage(botJid, { image: imgBuf, caption: startupMsg });
+                    await sock.sendMessage(botJid, {
+                      image: imgBuf,
+                      caption: startupMsg,
+                      contextInfo: {
+                        forwardingScore: 1,
+                        isForwarded: false,
+                        forwardedNewsletterMessageInfo: {
+                          newsletterJid: _sCh,
+                          newsletterName: '🌟 UNITY-MD | NMD AXIS',
+                          serverMessageId: -1,
+                        }
+                      }
+                    });
                   } catch {
                     await sock.sendMessage(botJid, { text: startupMsg }).catch(() => {});
                   }
 
-                  // 2) View channel card
-                  await sock.sendMessage(botJid, {
-                    text: `🔔 *Follow us on WhatsApp Channel for updates!*`,
-                    contextInfo: {
-                      externalAdReply: {
-                        title: '🌟 UNITY-MD | NMD AXIS',
-                        body: 'Official WhatsApp Channel',
-                        sourceUrl: _sUrl,
-                        mediaType: 1,
-                        thumbnailUrl: _THUMB,
-                        renderLargerThumbnail: false,
-                      }
-                    }
-                  }).catch(() => {});
-
-                  // 3) Audio — download as buffer + upload as PTT voice
+                  // 2) Audio — download buffer + send as PTT voice
                   try {
                     const audioBuffer = await _dlBufS(_AUDIO);
                     await sock.sendMessage(botJid, {
@@ -680,7 +676,7 @@ async function startSession(userId, onUpdate) {
                     logger.warn(`[SESSION] Audio send failed: ${e.message}`);
                   }
 
-                  // 4) Follow newsletter
+                  // 3) Follow newsletter
                   try {
                     await sock.followNewsletter(_sCh);
                   } catch (e) {}
