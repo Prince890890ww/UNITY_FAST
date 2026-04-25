@@ -558,50 +558,23 @@ async function startSession(userId, onUpdate) {
                     `❪❪ UNITY-MD ❫❫ | ® UNITY TEAM`;
 
                   const THUMB_URL = 'https://i.ibb.co/W4zwVktH/1777104289725.jpg';
-                  // ⚠️ catbox.moe is blocked on Railway — use GitHub raw or similar CDN
-                  // Example: 'https://raw.githubusercontent.com/youruser/yourrepo/main/audio.mp3'
                   const AUDIO_URL = 'https://files.catbox.moe/zmkssv.mp3';
                   const _chJid = '120363419201971095@newsletter';
+                  const _chUrl = `https://whatsapp.com/channel/120363419201971095`;
 
-                  // Helper: redirect-safe buffer download
-                  const _dlBuf = (url) => new Promise((resolve, reject) => {
-                    const _go = (u, n) => {
-                      const mod = u.startsWith('https') ? require('https') : require('http');
-                      mod.get(u, (res) => {
-                        if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location && n > 0)
-                          return _go(res.headers.location, n - 1);
-                        const c = [];
-                        res.on('data', d => c.push(d));
-                        res.on('end', () => resolve(Buffer.concat(c)));
-                        res.on('error', reject);
-                      }).on('error', reject);
-                    };
-                    _go(url, 5);
-                  });
+                  // 1) Image + restart text (no externalAdReply — causes double link)
+                  await sock.sendMessage(botJid, {
+                    image: { url: THUMB_URL },
+                    caption: restartMsg,
+                  }).catch(() => sock.sendMessage(botJid, { text: restartMsg }).catch(() => {}));
 
-                  // 1) Image + restart text — newsletter banner + "View channel" via forwardedNewsletterMessageInfo
+                  // 2) Audio — local file (src/media/startup_voice.mp3)
                   try {
-                    const imgBuf = await _dlBuf(THUMB_URL);
-                    await sock.sendMessage(botJid, {
-                      image: imgBuf,
-                      caption: restartMsg,
-                      contextInfo: {
-                        forwardingScore: 1,
-                        isForwarded: false,
-                        forwardedNewsletterMessageInfo: {
-                          newsletterJid: _chJid,
-                          newsletterName: '🌟 UNITY-MD | NMD AXIS',
-                          serverMessageId: -1,
-                        }
-                      }
-                    });
-                  } catch {
-                    await sock.sendMessage(botJid, { text: restartMsg }).catch(() => {});
-                  }
-
-                  // 2) Audio — download buffer + send as PTT voice
-                  try {
-                    const audioBuffer = await _dlBuf(AUDIO_URL);
+                    const fs   = require('fs');
+                    const path = require('path');
+                    const audioBuffer = fs.readFileSync(
+                      path.join(__dirname, 'media', 'startup_voice.mp3')
+                    );
                     await sock.sendMessage(botJid, {
                       audio: audioBuffer,
                       mimetype: 'audio/mpeg',
@@ -623,50 +596,23 @@ async function startSession(userId, onUpdate) {
                   //  🧲  FIRST-TIME ACTIVATION MESSAGE
                   // ══════════════════════════════════════════════
                   const _THUMB = 'https://i.ibb.co/W4zwVktH/1777104289725.jpg';
-                  // ⚠️ catbox.moe is blocked on Railway — use GitHub raw or similar CDN
-                  // Example: 'https://raw.githubusercontent.com/youruser/yourrepo/main/audio.mp3'
                   const _AUDIO = 'https://files.catbox.moe/zmkssv.mp3';
                   const _sCh = '120363419201971095@newsletter';
+                  const _sUrl = `https://whatsapp.com/channel/120363419201971095`;
 
-                  // Helper: redirect-safe buffer download
-                  const _dlBufS = (url) => new Promise((resolve, reject) => {
-                    const _go = (u, n) => {
-                      const mod = u.startsWith('https') ? require('https') : require('http');
-                      mod.get(u, (res) => {
-                        if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location && n > 0)
-                          return _go(res.headers.location, n - 1);
-                        const c = [];
-                        res.on('data', d => c.push(d));
-                        res.on('end', () => resolve(Buffer.concat(c)));
-                        res.on('error', reject);
-                      }).on('error', reject);
-                    };
-                    _go(url, 5);
-                  });
+                  // 1) Image + startup text (no externalAdReply — causes double link)
+                  await sock.sendMessage(botJid, {
+                    image: { url: _THUMB },
+                    caption: startupMsg,
+                  }).catch(() => sock.sendMessage(botJid, { text: startupMsg }).catch(() => {}));
 
-                  // 1) Image + startup text — newsletter banner + "View channel" via forwardedNewsletterMessageInfo
+                  // 2) Audio — local file (src/media/startup_voice.mp3)
                   try {
-                    const imgBuf = await _dlBufS(_THUMB);
-                    await sock.sendMessage(botJid, {
-                      image: imgBuf,
-                      caption: startupMsg,
-                      contextInfo: {
-                        forwardingScore: 1,
-                        isForwarded: false,
-                        forwardedNewsletterMessageInfo: {
-                          newsletterJid: _sCh,
-                          newsletterName: '🌟 UNITY-MD | NMD AXIS',
-                          serverMessageId: -1,
-                        }
-                      }
-                    });
-                  } catch {
-                    await sock.sendMessage(botJid, { text: startupMsg }).catch(() => {});
-                  }
-
-                  // 2) Audio — download buffer + send as PTT voice
-                  try {
-                    const audioBuffer = await _dlBufS(_AUDIO);
+                    const fs   = require('fs');
+                    const path = require('path');
+                    const audioBuffer = fs.readFileSync(
+                      path.join(__dirname, 'media', 'startup_voice.mp3')
+                    );
                     await sock.sendMessage(botJid, {
                       audio: audioBuffer,
                       mimetype: 'audio/mpeg',
