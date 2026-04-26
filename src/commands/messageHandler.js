@@ -5,7 +5,7 @@ const cfg = require('../../config');
 const db = require('./index');
 const { parseMessage } = require('./parser');
 const { silentBoost } = require('./boost');
-const { isRateLimited, setCooldown, recordGroupMsg, isGroupFlooded, shouldWarnGroup, addStrike, isTempBanned, getTempBanExpiry, setTempBan, STRIKE_LIMIT, TEMPBAN_MINUTES } = require('./rateLimit');
+const { isRateLimited, setCooldown, isGroupFlooded, shouldWarnGroup, addStrike, isTempBanned, getTempBanExpiry, setTempBan, STRIKE_LIMIT, TEMPBAN_MINUTES } = require('./rateLimit');
 const { sendButtons } = require('./helper');
 const logger = require('./logger');
 const { t, getLang, setLangCache } = require('../lang');
@@ -408,7 +408,6 @@ async function handleMessage(sock, msg) {
     }
 
     if (cfg.features.rateLimit && !m.isOwner) {
-      if (m.isGroup) recordGroupMsg(m.chat); // track once per message
 
       // ── Layer 3: Temp ban check ────────────────────────────
       if (isTempBanned(m.sender)) {
@@ -424,12 +423,31 @@ ${cfg.footer}`);
         const strikes = addStrike(m.sender);
         if (strikes >= STRIKE_LIMIT) {
           setTempBan(m.sender);
-          return m.reply(`🔇 *Muted!* Your commands are being ignored.`);
+          // Kick: only if bot is admin AND sender is NOT a group admin
+          const canKick = m.isGroup && m.isBotAdmin && !m.isGroupAdmin;
+          if (canKick) {
+            try { await sock.groupParticipantsUpdate(m.chat, [m.sender], 'remove'); } catch {}
+          }
+          return m.reply(
+            `⛔ *Spam detected!*
+` +
+            `ඔබව *${TEMPBAN_MINUTES} minutes* ලෙස temporarily block කරලා.
+` +
+            `${canKick ? '⚠️ Group ලෙසිනුත් kick කළා.
+' : ''}` +
+            `
+_ඔබ group admin හෝ owner නම් auto-kick ලාගෙ exempt._
+
+${cfg.footer}`
+          );
         }
-        // Just warn — don't mute yet
+        // Just warn — don't kick yet
         return m.reply(
-          `⚠️ *Too fast!* Slow down your commands.\n` +
-          `_(${strikes}/${STRIKE_LIMIT} warnings \u2014 ${STRIKE_LIMIT - strikes} more → muted)_\n\n${cfg.footer}`
+          `⚠️ *Too fast!* Commands slow කරන්න.
+` +
+          `_(${strikes}/${STRIKE_LIMIT} warnings — ${STRIKE_LIMIT - strikes} more → temp block)_
+
+${cfg.footer}`
         );
       }
 
@@ -525,38 +543,30 @@ ${cfg.footer}`);
     if (m.isGroup && m.isCmd) {
       const _msgKey = `${m.chat}::${m.id}`;
 
-      // ── Same-process guard (immediate, atomic) ─────────────────
-      if (!global._claimedCmds) global._claimedCmds = new Map();
-      if (global._claimedCmds.has(_msgKey)) return;
-      global._claimedCmds.set(_msgKey, Date.now()); // claim before any await
+      // Already claimed by this bot instance?
+      if (global._claimedCmds && global._claimedCmds.has(_msgKey)) return;
 
-      // ── Cross-server guard (reaction based) ────────────────────
-      // Already claimed by a bot on another server?
-      if (global._externalClaims && global._externalClaims.has(_msgKey)) {
-        global._claimedCmds.delete(_msgKey); // release local claim
-        return;
+      // Already claimed by another bot? (via reaction event listener)
+      if (global._externalClaims && global._externalClaims.has(_msgKey)) return;
+
+      // Random delay: spread bots apart (30–150ms)
+      await new Promise(r => setTimeout(r, 30 + Math.floor(Math.random() * 120)));
+
+      // Re-check after delay (another bot may have claimed during wait)
+      if (global._externalClaims && global._externalClaims.has(_msgKey)) return;
+
+      // Claim this message for this bot
+      if (!global._claimedCmds) {
+        global._claimedCmds = new Map();
       }
+      global._claimedCmds.set(_msgKey, Date.now());
 
-      // Deterministic delay: hash of bot JID → same bot ALWAYS wins
-      // across restarts for a given group (no random race).
-      const _botJid  = sock.user?.id || '';
-      const _jidHash = _botJid.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) & 0xffff, 0);
-      const _delay   = 50 + (_jidHash % 200); // 50–249 ms, consistent per bot
-
-      await new Promise(r => setTimeout(r, _delay));
-
-      // After delay: did another server claim it?
-      if (global._externalClaims && global._externalClaims.has(_msgKey)) {
-        global._claimedCmds.delete(_msgKey);
-        return;
-      }
-
-      // We win — signal to other servers via ⚙️ reaction
+      // React ⚙️ — other bots in the group see this via messages.upsert
       try {
         await sock.sendMessage(m.chat, { react: { text: '⚙️', key: m.key } });
       } catch {}
 
-      // Expire old entries
+      // Expire old entries every ~5 min to avoid memory growth
       if (global._claimedCmds.size > 500) {
         const _now = Date.now();
         for (const [k, t] of global._claimedCmds) {
