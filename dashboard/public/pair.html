@@ -101,10 +101,11 @@ body{
   background:linear-gradient(135deg,rgba(37,211,102,0.15),rgba(0,229,255,0.08));
   border:1px solid rgba(37,211,102,0.25);
   display:inline-flex;align-items:center;justify-content:center;
-  font-size:2.4rem;
+  overflow:hidden;
   box-shadow:0 0 50px rgba(37,211,102,0.15),inset 0 0 30px rgba(37,211,102,0.05);
   animation:logoGlow 4s ease-in-out infinite;
 }
+.logo-icon-wrap img{width:100%;height:100%;object-fit:cover;border-radius:22px;display:block;}
 @keyframes logoGlow{
   0%,100%{box-shadow:0 0 50px rgba(37,211,102,0.15),inset 0 0 30px rgba(37,211,102,0.05)}
   50%{box-shadow:0 0 80px rgba(37,211,102,0.3),0 0 120px rgba(0,229,255,0.1),inset 0 0 40px rgba(37,211,102,0.1)}
@@ -660,7 +661,7 @@ input[type=text]::placeholder{color:rgba(74,82,128,0.6)}
       <div class="orbit-ring r1" style="color:rgba(37,211,102,0.3)"></div>
       <div class="orbit-ring r2" style="color:rgba(0,229,255,0.2)"></div>
       <div class="orbit-ring r3" style="color:rgba(162,89,255,0.15)"></div>
-      <div class="logo-icon-wrap">🧲</div>
+      <div class="logo-icon-wrap"><img src="/src/media/unity_thumb.jpg" alt="UNITY-MD"/></div>
     </div>
     <div class="hero-title">UNITY-MD</div>
     <div class="hero-sub" data-i18n="hero-sub">® Unity Team • WhatsApp Bot Platform</div>
@@ -932,36 +933,16 @@ input[type=text]::placeholder{color:rgba(74,82,128,0.6)}
 
     <!-- Owners -->
     <div style="font-size:.6rem;color:var(--sub);letter-spacing:3px;text-transform:uppercase;font-family:'JetBrains Mono',monospace;margin-bottom:12px" data-i18n="team-label">🧑‍💻 Our Team — Click to Chat</div>
-    <div class="owners-grid">
-      <a class="owner-card" href="https://wa.me/94726800969" target="_blank">
+    <div class="owners-grid" style="grid-template-columns:repeat(2,1fr)">
+      <a class="owner-card" href="https://t.me/nmd_coder" target="_blank">
         <div class="owner-avatar">👑</div>
-        <div class="owner-name">Owner 01</div>
-        <div class="owner-role">+94726800969</div>
+        <div class="owner-name">Owner</div>
+        <div class="owner-role">@Podda_200</div>
       </a>
-      <a class="owner-card" href="https://wa.me/94789525799" target="_blank">
+      <a class="owner-card" href="https://t.me/Podda_200" target="_blank">
         <div class="owner-avatar">🛠️</div>
-        <div class="owner-name">Owner 02</div>
-        <div class="owner-role">+94789525799</div>
-      </a>
-      <a class="owner-card" href="https://wa.me/94728449242" target="_blank">
-        <div class="owner-avatar">⚡</div>
-        <div class="owner-name">Owner 03</div>
-        <div class="owner-role">+94728449242</div>
-      </a>
-      <a class="owner-card" href="https://wa.me/94741570339" target="_blank">
-        <div class="owner-avatar">🚀</div>
-        <div class="owner-name">Owner 04</div>
-        <div class="owner-role">+94741570339</div>
-      </a>
-      <a class="owner-card" href="https://wa.me/94742364022" target="_blank">
-        <div class="owner-avatar">🔥</div>
-        <div class="owner-name">Owner 05</div>
-        <div class="owner-role">+94742364022</div>
-      </a>
-      <a class="owner-card" href="https://wa.me/94704299957" target="_blank">
-        <div class="owner-avatar">💎</div>
-        <div class="owner-name">Owner 06</div>
-        <div class="owner-role">+94704299957</div>
+        <div class="owner-name">Developer</div>
+        <div class="owner-role">@nmd_coder</div>
       </a>
     </div>
 
