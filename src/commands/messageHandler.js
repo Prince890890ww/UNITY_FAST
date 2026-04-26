@@ -531,17 +531,10 @@ ${cfg.footer}`);
       // Already claimed by another bot? (via reaction event listener)
       if (global._externalClaims && global._externalClaims.has(_msgKey)) return;
 
-      // Random delay: spread bots apart (30–150ms)
-      await new Promise(r => setTimeout(r, 30 + Math.floor(Math.random() * 120)));
-
-      // Re-check after delay (another bot may have claimed during wait)
-      if (global._externalClaims && global._externalClaims.has(_msgKey)) return;
-
-      // Claim this message for this bot
-      if (!global._claimedCmds) {
-        global._claimedCmds = new Map();
-      }
-      global._claimedCmds.set(_msgKey, Date.now());
+      // Claim immediately (atomic within same process — global is shared)
+      if (!global._claimedCmds) global._claimedCmds = new Map();
+      if (global._claimedCmds.has(_msgKey)) return; // another session just claimed it
+      global._claimedCmds.set(_msgKey, Date.now()); // claim NOW before any await
 
       // React ⚙️ — other bots in the group see this via messages.upsert
       try {
