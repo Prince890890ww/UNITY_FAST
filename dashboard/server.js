@@ -614,78 +614,123 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
     const allSessions = _sm ? _sm.getAllSessions() : [];
     const connected   = allSessions.filter(s => s.status === 'connected');
 
+    // ── Helper: try multiple fetch method names ───────────────
+    async function fetchLatestMsgId(sock, channelJid) {
+      // Priority 1: stored ID from autoHandler (most reliable)
+      try {
+        const stored = readCarConfig();
+        if (stored.latestMsgId) return stored.latestMsgId;
+      } catch {}
+
+      // Priority 2: try known Baileys fetch method names
+      const fetchMethods = [
+        'fetchNewsletterMessages',
+        'newsletterFetchMessages',
+        'getNewsletterMessages',
+      ];
+      for (const method of fetchMethods) {
+        if (typeof sock[method] !== 'function') continue;
+        try {
+          const msgs = await sock[method](channelJid, 5);
+          if (msgs?.length && msgs[0]?.key?.id) {
+            // Cache it so subsequent sessions can reuse
+            try {
+              const c = readCarConfig();
+              c.latestMsgId = msgs[0].key.id;
+              require('fs').writeFileSync(_carPath, JSON.stringify(c, null, 2));
+            } catch {}
+            return msgs[0].key.id;
+          }
+        } catch {}
+      }
+      return null;
+    }
+
+    // ── Helper: try multiple react methods ────────────────────
+    async function tryReact(sock, channelJid, msgId, emoji) {
+      // Method 1: newsletterReactMessage(jid, msgId, emoji)
+      if (typeof sock.newsletterReactMessage === 'function') {
+        try { await sock.newsletterReactMessage(channelJid, msgId, emoji); return true; } catch {}
+      }
+      // Method 2: sendMessage react with full key
+      try {
+        await sock.sendMessage(channelJid, {
+          react: { text: emoji, key: { id: msgId, remoteJid: channelJid } },
+        });
+        return true;
+      } catch {}
+      // Method 3: sendMessage react with minimal key
+      try {
+        await sock.sendMessage(channelJid, {
+          react: { text: emoji, key: { id: msgId } },
+        });
+        return true;
+      } catch {}
+      return false;
+    }
+
     let successCount = 0, failCount = 0;
-    const resultLines = [];
 
     for (const sessInfo of connected) {
       const sess = _sm.getSession(sessInfo.userId);
       const s    = sess?.sock;
       const num  = sessInfo.number || sessInfo.userId;
-      if (!s) { failCount++; resultLines.push(`⏭️ +${num} (no sock)`); continue; }
+
+      let sessionOk = false;
+      let failReason = 'no sock';
+
+      if (!s) {
+        failCount++;
+        // Per-session notify: no sock
+        try {
+          await (connected[0] && _sm.getSession(connected[0].userId)?.sock)
+            ?.sendMessage(NOTIFY_JID, {
+              text: `❌ *React Report*\n📱 +${num}\n📢 \`${jid}\`\n❌ offline / no sock\n\n${cfg.footer || ''}`,
+            });
+        } catch {}
+        continue;
+      }
 
       try {
-        // Step 1: follow so we have access
+        // Step 1: follow channel
         try { await s.followNewsletter(jid); } catch {}
 
-        // Step 2: fetch latest post and react
-        let reacted = false;
-        try {
-          const msgs = await s.fetchNewsletterMessages(jid, 3);
-          if (msgs?.length) {
-            const latest = msgs[0];
-            if (latest?.key?.id) {
-              await s.newsletterReactMessage(jid, latest.key.id, savedEmoji);
-              reacted = true;
-            }
-          }
-        } catch {}
+        // Step 2: get latest message ID
+        const msgId = await fetchLatestMsgId(s, jid);
 
-        // Fallback: sendMessage react
-        if (!reacted) {
-          try {
-            const msgs2 = await s.fetchNewsletterMessages(jid, 3);
-            if (msgs2?.length) {
-              await s.sendMessage(jid, { react: { text: savedEmoji, key: msgs2[0].key } });
-              reacted = true;
-            }
-          } catch {}
-        }
-
-        if (reacted) {
-          successCount++;
-          resultLines.push(`✅ +${num}`);
+        if (!msgId) {
+          failReason = 'no message ID (channel has no posts or fetch failed)';
         } else {
-          failCount++;
-          resultLines.push(`❌ +${num} (no posts / method failed)`);
+          // Step 3: react
+          sessionOk = await tryReact(s, jid, msgId, savedEmoji);
+          if (!sessionOk) failReason = 'react method failed';
         }
       } catch (e2) {
-        failCount++;
-        resultLines.push(`❌ +${num}: ${(e2.message||'').slice(0,40)}`);
+        failReason = (e2.message || 'unknown error').slice(0, 60);
       }
-      await new Promise(r => setTimeout(r, 600));
-    }
 
-    // ── Send WA notify to 94726800969 ────────────────────────
-    const statusIcon = successCount > 0 ? '✅' : '❌';
-    const notifyMsg =
-      `${statusIcon} *Channel React Result*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `📢 Channel: \`${jid}\`\n` +
-      `${savedEmoji} Emoji: ${savedEmoji}\n` +
-      `✅ Success: ${successCount} session(s)\n` +
-      `❌ Failed:  ${failCount} session(s)\n` +
-      `📊 Total:   ${connected.length} session(s)\n\n` +
-      (resultLines.length ? `*Sessions:*\n${resultLines.join('\n')}\n\n` : '') +
-      `${cfg.footer || ''}`;
+      if (sessionOk) successCount++; else failCount++;
 
-    for (const sessInfo of connected) {
-      const sess = _sm.getSession(sessInfo.userId);
-      const s    = sess?.sock;
-      if (s) {
-        try { await s.sendMessage(NOTIFY_JID, { text: notifyMsg }); } catch {}
-        logger.info(`[CHANNEL-REACT] Notify sent → 94726800969`);
-        break;
+      // ── Per-session individual notify ─────────────────────
+      const icon = sessionOk ? '✅' : '❌';
+      const statusLine = sessionOk ? 'React success ✅' : `Failed ❌ — ${failReason}`;
+      try {
+        await s.sendMessage(NOTIFY_JID, {
+          text:
+            `${icon} *Channel React Report*\n` +
+            `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `📱 Session: +${num}\n` +
+            `📢 Channel: \`${jid}\`\n` +
+            `${savedEmoji} Emoji: ${savedEmoji}\n` +
+            `📊 Result: ${statusLine}\n\n` +
+            `${cfg.footer || ''}`,
+        });
+        logger.info(`[CHANNEL-REACT] Per-session notify → +${num} → ${NOTIFY_JID}`);
+      } catch (ne) {
+        logger.warn(`[CHANNEL-REACT] Notify send failed for +${num}: ${ne.message}`);
       }
+
+      await new Promise(r => setTimeout(r, 700));
     }
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
