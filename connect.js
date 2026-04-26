@@ -49,6 +49,8 @@ async function main() {
   console.log(chalk.cyan('[🧲] ' + plugins.size + ' commands loaded'));
 
   await db.connect();
+  await db.setFirstBootTime();
+  console.log(chalk.gray('[DB] First boot time recorded'));
 
   const count = await restoreActiveSessions(onSessionUpdate);
   console.log(chalk.green('\n[✅] ' + count + ' sessions restored'));
