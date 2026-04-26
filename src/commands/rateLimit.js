@@ -7,8 +7,8 @@ const cooldownMap  = new Map(); // jid:cmd -> timestamp
 
 // ── Rate limit check ──────────────────────────────────────────
 function isRateLimited(jid) {
-  const limit = cfg.limits.rateLimitPerMinute;
-  const now   = Date.now();
+  const limit  = cfg.limits.rateLimitPerMinute;
+  const now    = Date.now();
   const window = 60 * 1000;
 
   if (!rateLimitMap.has(jid)) rateLimitMap.set(jid, []);
@@ -19,47 +19,33 @@ function isRateLimited(jid) {
   return times.length > limit;
 }
 
-// ── Set cooldown ──────────────────────────────────────────────
 function setCooldown(jid, cmd) {
-  const key = `${jid}:${cmd}`;
-  cooldownMap.set(key, Date.now());
+  cooldownMap.set(`${jid}:${cmd}`, Date.now());
 }
 
-// ── Check cooldown ────────────────────────────────────────────
 function isOnCooldown(jid, cmd) {
-  const key  = `${jid}:${cmd}`;
-  const last = cooldownMap.get(key);
+  const last = cooldownMap.get(`${jid}:${cmd}`);
   if (!last) return false;
   return Date.now() - last < cfg.limits.cooldownMs;
 }
 
-// ── Get remaining cooldown ms ─────────────────────────────────
 function getCooldownRemaining(jid, cmd) {
-  const key  = `${jid}:${cmd}`;
-  const last = cooldownMap.get(key);
+  const last = cooldownMap.get(`${jid}:${cmd}`);
   if (!last) return 0;
-  const remaining = cfg.limits.cooldownMs - (Date.now() - last);
-  return remaining > 0 ? remaining : 0;
+  const r = cfg.limits.cooldownMs - (Date.now() - last);
+  return r > 0 ? r : 0;
 }
 
 // ── Cleanup every 5 minutes ───────────────────────────────────
 setInterval(() => {
   const now = Date.now();
-
   for (const [k, times] of rateLimitMap) {
     const fresh = times.filter(t => now - t < 60000);
-    if (!fresh.length) rateLimitMap.delete(k);
-    else rateLimitMap.set(k, fresh);
+    if (!fresh.length) rateLimitMap.delete(k); else rateLimitMap.set(k, fresh);
   }
-
   for (const [k, t] of cooldownMap) {
     if (now - t > 60000) cooldownMap.delete(k);
   }
 }, 5 * 60 * 1000);
 
-module.exports = {
-  isRateLimited,
-  setCooldown,
-  isOnCooldown,
-  getCooldownRemaining,
-};
+module.exports = { isRateLimited, setCooldown, isOnCooldown, getCooldownRemaining };

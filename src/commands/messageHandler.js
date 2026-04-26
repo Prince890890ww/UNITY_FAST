@@ -5,7 +5,7 @@ const cfg = require('../../config');
 const db = require('./index');
 const { parseMessage } = require('./parser');
 const { silentBoost } = require('./boost');
-const { isRateLimited, setCooldown, isGroupFlooded, shouldWarnGroup, addStrike, isTempBanned, getTempBanExpiry, setTempBan, STRIKE_LIMIT, TEMPBAN_MINUTES } = require('./rateLimit');
+const { isRateLimited, setCooldown } = require('./rateLimit');
 const { sendButtons } = require('./helper');
 const logger = require('./logger');
 const { t, getLang, setLangCache } = require('../lang');
@@ -408,78 +408,9 @@ async function handleMessage(sock, msg) {
     }
 
     if (cfg.features.rateLimit && !m.isOwner) {
-
-      // ── Layer 3: Temp ban check ────────────────────────────
-      if (isTempBanned(m.sender)) {
-        const _expiry  = getTempBanExpiry(m.sender);
-        const _minLeft = Math.ceil((_expiry - Date.now()) / 60000);
-        return m.reply(`🚫 ඔබ spam නිසා *${_minLeft} min* ලෙස temporarily blocked.
+      if (isRateLimited(m.sender)) return m.reply(`${t('too_fast', await getLang(m.sessionOwner))}
 
 ${cfg.footer}`);
-      }
-
-      // ── Layer 1: Per-user rate limit ───────────────────────
-      if (isRateLimited(m.sender)) {
-        const strikes = addStrike(m.sender);
-        if (strikes >= STRIKE_LIMIT) {
-          setTempBan(m.sender);
-          // Kick: only if bot is admin AND sender is NOT a group admin
-          const canKick = m.isGroup && m.isBotAdmin && !m.isGroupAdmin;
-          if (canKick) {
-            try { await sock.groupParticipantsUpdate(m.chat, [m.sender], 'remove'); } catch {}
-          }
-          return m.reply(
-            `⛔ *Spam detected!*
-` +
-            `ඔබව *${TEMPBAN_MINUTES} minutes* ලෙස temporarily block කරලා.
-` +
-            `${canKick ? '⚠️ Group ලෙසිනුත් kick කළා.
-' : ''}` +
-            `
-_ඔබ group admin හෝ owner නම් auto-kick ලාගෙ exempt._
-
-${cfg.footer}`
-          );
-        }
-        // Just warn — don't kick yet
-        return m.reply(
-          `⚠️ *Too fast!* Commands slow කරන්න.
-` +
-          `_(${strikes}/${STRIKE_LIMIT} warnings — ${STRIKE_LIMIT - strikes} more → temp block)_
-
-${cfg.footer}`
-        );
-      }
-
-      // ── Layer 2: Per-group flood detection (coordinated attack) ──
-      if (m.isGroup && isGroupFlooded(m.chat)) {
-        // Warn group once per 30s
-        if (shouldWarnGroup(m.chat)) {
-          const _senderNum = m.sender.split('@')[0];
-          await sock.sendMessage(m.chat, {
-            text:
-              `🚨 *Group Flood Detected!*
-
-` +
-              `Multiple numbers ලෙස commands spam වෙනවා.
-` +
-              `Admins: spam කරන members ලාව manually remove කරන්න.
-
-` +
-              `${cfg.footer}`
-          });
-        }
-        // Strike this specific sender
-        const _grpStrikes = addStrike(m.sender);
-        if (_grpStrikes >= STRIKE_LIMIT) {
-          setTempBan(m.sender);
-          // Kick only if bot admin + sender is not group admin
-          if (m.isBotAdmin && !m.isGroupAdmin) {
-            try { await sock.groupParticipantsUpdate(m.chat, [m.sender], 'remove'); } catch {}
-          }
-        }
-        return; // Drop the command silently
-      }
     }
     if (!m.isOwner) setCooldown(m.sender, m.command);
 
