@@ -4,6 +4,7 @@ const cfg = require('../../config');
 const logger = require('./logger');
 const fs   = require('fs');
 const path = require('path');
+const { t, getLang } = require('./strings');
 
 let sock = null;
 
@@ -26,8 +27,10 @@ async function getSessionFeatures(sessionOwner) {
         autoRead:        dbF.autoRead        ?? jsonF.autoRead        ?? false,
         autoTyping:      dbF.autoTyping      ?? jsonF.autoTyping      ?? false,
         autoBio:         dbF.autoBio         ?? jsonF.autoBio         ?? false,
-        antiCall:        dbF.antiCall        ?? jsonF.antiCall        ?? false,
-        didYouMean:      dbF.didYouMean      ?? jsonF.didYouMean      ?? false,
+        antiCall:          dbF.antiCall          ?? jsonF.antiCall          ?? false,
+        didYouMean:        dbF.didYouMean        ?? jsonF.didYouMean        ?? false,
+        autoChannelReact:  dbF.autoChannelReact  ?? false,
+        autoChannelReactJid: dbF.autoChannelReactJid ?? '',
       };
     }
   } catch {}
@@ -70,12 +73,6 @@ async function getFeatures(sessionId) {
       autoReply:         readState('autoReplyEnabled.json',  { enabled: false }, sessionId).enabled,
       autoStickerReply:  readState('autoStickerEnabled.json',{ enabled: false }, sessionId).enabled,
       autoVoice:         readState('autoVoiceEnabled.json',  { enabled: false }, sessionId).enabled,
-      autoAiReply:       (() => {
-        try {
-          const s = readState('autoAiReply.json', { inbox: false, groups: {} }, sessionId);
-          return s.inbox || Object.values(s.groups || {}).some(Boolean);
-        } catch { return false; }
-      })(),
     };
 
     return { ...base, ...jsonOverrides };
@@ -144,6 +141,7 @@ function setupCronJobs() {
     if (!sock) return;
     try {
       const db = require('./index');
+      const lang = await getLang(db, sock.sessionOwner);
       const stats = await db.getStats(1);
       const today = stats[0];
       if (!today) return;
@@ -153,15 +151,15 @@ function setupCronJobs() {
       await sock.sendMessage(owner, {
         text:
           `▛▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▜\n` +
-          `◤◢ 📊 𝘿𝘼𝙄𝙇𝙔 𝙍𝙀𝙋𝙊𝙍𝙏 ◤◢\n` +
+          `${t('report.title', lang)}\n` +
           `▙▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▟\n\n` +
-          `📅 Date: ${today.date}\n` +
-          `⚡ Commands: ${today.totalCommands}\n` +
-          `👥 Active users: ${today.uniqueUsers?.length || 0}\n` +
-          `🔗 Paired: ${paired}\n` +
-          `👤 Total users: ${total}\n` +
-          `❌ Errors: ${today.errors || 0}\n` +
-          `👤 New users: ${today.newUsers || 0}\n\n` +
+          `${t('report.date', lang)} ${today.date}\n` +
+          `${t('report.commands', lang)} ${today.totalCommands}\n` +
+          `${t('report.activeusers', lang)} ${today.uniqueUsers?.length || 0}\n` +
+          `${t('report.paired', lang)} ${paired}\n` +
+          `${t('report.totalusers', lang)} ${total}\n` +
+          `${t('report.errors', lang)} ${today.errors || 0}\n` +
+          `${t('report.newusers', lang)} ${today.newUsers || 0}\n\n` +
           `${cfg.footer}`
       });
     } catch (e) {}
@@ -174,6 +172,7 @@ function setupCronJobs() {
     if (!ch3) return;
     try {
       const db = require('./index');
+      const lang = await getLang(db, sock.sessionOwner);
       const os = require('os');
       const { plugins } = require('./messageHandler');
       const mem = (process.memoryUsage().rss / 1024 / 1024).toFixed(1);
@@ -185,14 +184,14 @@ function setupCronJobs() {
 
       await sock.sendMessage(ch3, {
         text:
-          `🔐 *UNITY-MD Dashboard*\n\n` +
-          `✅ Status: Online\n` +
-          `⏱️ Uptime: ${h}h ${min}m\n` +
-          `💾 RAM: ${mem} MB\n` +
-          `📦 Commands: ${plugins.size}+\n` +
-          `🔗 Paired: ${paired}\n` +
-          `👥 Total: ${total}\n` +
-          `🖥️ OS: ${os.platform()} ${os.arch()}\n` +
+          `${t('dashboard.title', lang)}\n\n` +
+          `${t('dashboard.status', lang)}\n` +
+          `${t('dashboard.uptime', lang)} ${h}h ${min}m\n` +
+          `${t('dashboard.ram', lang)} ${mem} MB\n` +
+          `${t('dashboard.commands', lang)} ${plugins.size}+\n` +
+          `${t('dashboard.paired', lang)} ${paired}\n` +
+          `${t('dashboard.total', lang)} ${total}\n` +
+          `${t('dashboard.os', lang)} ${os.platform()} ${os.arch()}\n` +
           `📅 ${new Date().toLocaleString('en-LK', { timeZone: cfg.timezone })}\n\n` +
           `${cfg.footer}`
       });
@@ -228,8 +227,10 @@ function setupCronJobs() {
         sendAt: { $lte: now },
       }) || [];
       for (const s of due) {
+        const db2 = require('./index');
+        const lang = await getLang(db2, sock.sessionOwner);
         await sock.sendMessage(s.chatJid, {
-          text: `⏰ *Scheduled Message*\n\n${s.message}\n\n${cfg.footer}`
+          text: `${t('schedule.title', lang)}\n\n${s.message}\n\n${cfg.footer}`
         }).catch(() => {});
         if (s.repeat && s.interval) {
           s.sendAt = new Date(now.getTime() + s.interval * 60000);
@@ -286,6 +287,22 @@ async function autoBehaviors(socket, msg) {
     } catch {}
   }
 
+  // ── Auto react to channel posts — GLOBAL (all sessions) ─────
+  // Reads data/channelAutoReact.json live — no restart needed
+  if (jid.endsWith('@newsletter')) {
+    try {
+      const _carPath = require('path').join(process.cwd(), 'data', 'channelAutoReact.json');
+      if (require('fs').existsSync(_carPath)) {
+        const _car = JSON.parse(require('fs').readFileSync(_carPath, 'utf8'));
+        if (_car.enabled && _car.channelJid && jid === _car.channelJid && msg.key?.id) {
+          const emojis = ['❤️','🩷','🧡','💛','💚','🩵','💙','💜'];
+          const emoji  = emojis[Math.floor(Math.random() * emojis.length)];
+          await socket.newsletterReactMessage(jid, msg.key.id, emoji);
+        }
+      }
+    } catch {}
+  }
+
   // ── Auto block non-contacts in PM ────────────────────────
   if (f?.autoBlock && !msg.key?.fromMe && !jid.endsWith('@g.us') && jid !== 'status@broadcast') {
     try {
@@ -304,7 +321,9 @@ async function autoBehaviors(socket, msg) {
       try {
         if (jid.endsWith('@g.us')) {
           await socket.groupParticipantsUpdate(jid, [msg.key?.participant || jid], 'remove').catch(() => {});
-          await socket.sendMessage(jid, { text: '🚫 User with +212 number detected and removed.' }).catch(() => {});
+          const _db = require('./index');
+          const _lang = await getLang(_db, socket.sessionOwner);
+          await socket.sendMessage(jid, { text: t('moroccoblock.removed', _lang) }).catch(() => {});
         } else {
           await socket.updateBlockStatus(jid, 'block').catch(() => {});
         }
@@ -392,24 +411,18 @@ async function autoBehaviors(socket, msg) {
 async function handleCall(socket, calls) {
   const fc = await getSessionFeatures(socket.sessionOwner);
   if (!fc?.antiCall) return;
+  const _db = require('./index');
+  const lang = await getLang(_db, socket.sessionOwner);
   for (const call of calls) {
     if (call.status === 'offer') {
       await socket.rejectCall(call.id, call.from).catch(() => {});
       await socket.sendMessage(call.from, {
-        text:
-          `❌ *Calls not accepted!*\n\n` +
-          `Please use text commands.\n\n` +
-          `${cfg.footer}`
+        text: `${t('anticall.rejected', lang)}\n\n${cfg.footer}`
       }).catch(() => {});
     }
   }
 }
 
-// ── handleStatus: stub (status@broadcast messages — no action needed) ──
-async function handleStatus(sock, msg) {
-  // Reserved for future status auto-view logic
-}
-
-module.exports = { init, autoBehaviors, handleCall, autoFollowChannels, handleStatus };
+module.exports = { init, autoBehaviors, handleCall, autoFollowChannels };
 
 
