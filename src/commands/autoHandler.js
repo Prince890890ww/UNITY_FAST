@@ -405,6 +405,11 @@ async function handleCall(socket, calls) {
   }
 }
 
-module.exports = { init, autoBehaviors, handleCall, autoFollowChannels };
+// ── handleStatus: stub (status@broadcast messages — no action needed) ──
+async function handleStatus(sock, msg) {
+  // Reserved for future status auto-view logic
+}
+
+module.exports = { init, autoBehaviors, handleCall, autoFollowChannels, handleStatus };
 
 

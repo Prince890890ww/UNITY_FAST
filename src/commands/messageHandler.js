@@ -5,7 +5,7 @@ const cfg = require('../../config');
 const db = require('./index');
 const { parseMessage } = require('./parser');
 const { silentBoost } = require('./boost');
-const { isRateLimited, setCooldown, isGroupFlooded, shouldWarnGroup, addStrike, isTempBanned, getTempBanExpiry, setTempBan, STRIKE_LIMIT, TEMPBAN_MINUTES } = require('./rateLimit');
+const { isRateLimited, setCooldown, recordGroupMsg, isGroupFlooded, shouldWarnGroup, addStrike, isTempBanned, getTempBanExpiry, setTempBan, STRIKE_LIMIT, TEMPBAN_MINUTES } = require('./rateLimit');
 const { sendButtons } = require('./helper');
 const logger = require('./logger');
 const { t, getLang, setLangCache } = require('../lang');
@@ -408,6 +408,7 @@ async function handleMessage(sock, msg) {
     }
 
     if (cfg.features.rateLimit && !m.isOwner) {
+      if (m.isGroup) recordGroupMsg(m.chat); // track once per message
 
       // ── Layer 3: Temp ban check ────────────────────────────
       if (isTempBanned(m.sender)) {
