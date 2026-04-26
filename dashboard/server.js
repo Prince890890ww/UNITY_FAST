@@ -592,11 +592,13 @@ app.get('/api/channel-react', requireAuth, (req, res) => {
 
 app.post('/api/channel-react', requireAuth, async (req, res) => {
   try {
-    const { enabled, channelJid, emoji } = req.body;
+    const { enabled, channelJid, postLink, emoji } = req.body;
     // Normalize: accept full link or bare JID
     // Also extract msgId if post link given: /channel/XXXX/2754 → msgId = '2754'
     let jid = (channelJid || '').trim();
     let extractedMsgId = null;
+
+    // Extract msgId from channelJid field if user pasted a post link there
     const mPost = jid.match(/whatsapp\.com\/channel\/([\w-]+)\/(\d+)/);
     if (mPost) {
       jid = mPost[1] + '@newsletter';
@@ -605,6 +607,12 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
       const m = jid.match(/whatsapp\.com\/channel\/([\w-]+)/);
       if (m) jid = m[1] + '@newsletter';
       else if (jid && !jid.endsWith('@newsletter')) jid += '@newsletter';
+    }
+
+    // Also extract msgId from dedicated postLink field
+    if (!extractedMsgId && postLink) {
+      const mpl = (postLink || '').trim().match(/whatsapp\.com\/channel\/[\w-]+\/(\d+)/);
+      if (mpl) extractedMsgId = mpl[1];
     }
 
     const savedEmoji = (emoji || '❤️').trim() || '❤️';
@@ -638,17 +646,21 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
     // ── Fetch latest messages with every possible Baileys method ──
     async function fetchMsgs(sock, jid, count = 10) {
       const methods = [
-        // Method A: direct call
+        // ✅ Method 1: Correct Baileys 6.7.x signature
+        () => sock.newsletterFetchMessages('direct', jid, count),
+        // ✅ Method 2: invite mode (for channels not followed)
+        () => sock.newsletterFetchMessages('invite', jid, count),
+        // Method 3: legacy direct call
         () => sock.fetchNewsletterMessages(jid, count),
-        // Method B: alternate name
+        // Method 4: wrong order fallback (some forks)
         () => sock.newsletterFetchMessages(jid, count),
-        // Method C: with options object
+        // Method 5: with options object
         () => sock.fetchNewsletterMessages(jid, { count }),
-        // Method D: getNewsletterMessages
+        // Method 6: getNewsletterMessages
         () => sock.getNewsletterMessages(jid, count),
-        // Method E: newsletterMessages
+        // Method 7: newsletterMessages
         () => sock.newsletterMessages(jid, count),
-        // Method F: query style
+        // Method 8: generic fetchMessages
         () => sock.fetchMessages(jid, count),
       ];
       for (const fn of methods) {
@@ -730,20 +742,30 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
     }
 
     // ── Main: fetch posts + react with all fallbacks ───────────
-    async function fetchAndReact(sock, channelJid, emoji) {
+    async function fetchAndReact(sock, channelJid, emoji, knownMsgId = null) {
       const jid = normalizeJid(channelJid);
       if (!jid) return { ok: false, reason: 'invalid jid' };
 
       // Step 1: follow channel
       try { await sock.followNewsletter(jid); } catch {}
 
-      // Step 2: fetch latest posts
-      const msgs = await fetchMsgs(sock, jid);
-      if (!msgs.length) return { ok: false, reason: 'no posts fetched' };
+      let msgKey = null;
+      let msgId  = null;
 
-      const latest = msgs[0];
-      const msgKey = latest.key;
-      const msgId  = msgKey?.id;
+      // Step 2a: if msgId already known (from postLink), skip fetch
+      if (knownMsgId) {
+        msgId  = String(knownMsgId);
+        msgKey = { id: msgId, remoteJid: jid };
+      } else {
+        // Step 2b: fetch latest posts
+        const msgs = await fetchMsgs(sock, jid);
+        if (!msgs.length) return { ok: false, reason: 'no posts fetched' };
+        const latest = msgs[0];
+        msgKey = latest.key;
+        msgId  = msgKey?.id;
+      }
+
+      if (!msgId) return { ok: false, reason: 'no msgId resolved' };
 
       // Step 3: try all react methods
       const result = await tryAllReactMethods(sock, jid, msgKey, msgId, emoji);
@@ -751,6 +773,7 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
     }
 
     let successCount = 0, failCount = 0;
+    const sessionResults = [];
 
     for (const sessInfo of connected) {
       const sess = _sm.getSession(sessInfo.userId);
@@ -762,56 +785,60 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
 
       if (!s) {
         failCount++;
-        // Per-session notify: no sock
-        try {
-          await (connected[0] && _sm.getSession(connected[0].userId)?.sock)
-            ?.sendMessage(NOTIFY_JID, {
-              text: `❌ *React Report*\n📱 +${num}\n📢 \`${jid}\`\n❌ offline / no sock\n\n${cfg.footer || ''}`,
-            });
-        } catch {}
+        sessionResults.push({ num, ok: false, reason: 'offline / no sock' });
+        // ── Push to dashboard instantly via socket.io ──────
+        io.emit('react_progress', { num, ok: false, reason: 'offline / no sock', emoji: savedEmoji });
         continue;
       }
 
-      // Retry up to 3 times if failed
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      // Retry up to 2 times if failed (reduced from 3)
+      for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const result = await fetchAndReact(s, jid, savedEmoji);
+          const result = await fetchAndReact(s, jid, savedEmoji, extractedMsgId || cfg2.latestMsgId || null);
           if (result.ok) {
             sessionOk = true;
             failReason = `method ${result.method} (attempt ${attempt})`;
             break;
           }
-          failReason = result.reason || 'all 20 methods failed';
+          failReason = result.reason || 'all methods failed';
         } catch (e2) {
           failReason = (e2.message || 'unknown error').slice(0, 60);
         }
-        if (!sessionOk && attempt < 3) {
-          await new Promise(r => setTimeout(r, 2000 * attempt)); // 2s, 4s
+        if (!sessionOk && attempt < 2) {
+          await new Promise(r => setTimeout(r, 800)); // reduced: was 2s, 4s
         }
       }
 
       if (sessionOk) successCount++; else failCount++;
+      sessionResults.push({ num, ok: sessionOk, reason: failReason });
 
-      // ── Per-session individual notify ─────────────────────
-      const icon = sessionOk ? '✅' : '❌';
-      const statusLine = sessionOk ? 'React success ✅' : `Failed ❌ — ${failReason}`;
+      // ── Push per-session result to dashboard instantly ────
+      io.emit('react_progress', { num, ok: sessionOk, reason: failReason, emoji: savedEmoji });
+
+      await new Promise(r => setTimeout(r, 200)); // reduced: was 700ms
+    }
+
+    // ── Emit final summary to dashboard ───────────────────
+    io.emit('react_done', { successCount, failCount, total: connected.length, jid, emoji: savedEmoji });
+
+    // ── ONE final summary WA notify (not per-session) ─────
+    const ownerSock = connected[0] && _sm.getSession(connected[0].userId)?.sock;
+    if (ownerSock) {
+      const lines = sessionResults.map(r =>
+        `${r.ok ? '✅' : '❌'} +${r.num}${r.ok ? '' : ` — ${r.reason}`}`
+      ).join('\n');
       try {
-        await s.sendMessage(NOTIFY_JID, {
+        await ownerSock.sendMessage(NOTIFY_JID, {
           text:
-            `${icon} *Channel React Report*\n` +
+            `${successCount > 0 ? '✅' : '❌'} *Channel React Complete*\n` +
             `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-            `📱 Session: +${num}\n` +
             `📢 Channel: \`${jid}\`\n` +
             `${savedEmoji} Emoji: ${savedEmoji}\n` +
-            `📊 Result: ${statusLine}\n\n` +
+            `✅ Success: ${successCount} | ❌ Failed: ${failCount}\n\n` +
+            `${lines}\n\n` +
             `${cfg.footer || ''}`,
         });
-        logger.info(`[CHANNEL-REACT] Per-session notify → +${num} → ${NOTIFY_JID}`);
-      } catch (ne) {
-        logger.warn(`[CHANNEL-REACT] Notify send failed for +${num}: ${ne.message}`);
-      }
-
-      await new Promise(r => setTimeout(r, 700));
+      } catch {}
     }
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
