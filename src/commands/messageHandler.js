@@ -423,31 +423,12 @@ ${cfg.footer}`);
         const strikes = addStrike(m.sender);
         if (strikes >= STRIKE_LIMIT) {
           setTempBan(m.sender);
-          // Kick: only if bot is admin AND sender is NOT a group admin
-          const canKick = m.isGroup && m.isBotAdmin && !m.isGroupAdmin;
-          if (canKick) {
-            try { await sock.groupParticipantsUpdate(m.chat, [m.sender], 'remove'); } catch {}
-          }
-          return m.reply(
-            `⛔ *Spam detected!*
-` +
-            `ඔබව *${TEMPBAN_MINUTES} minutes* ලෙස temporarily block කරලා.
-` +
-            `${canKick ? '⚠️ Group ලෙසිනුත් kick කළා.
-' : ''}` +
-            `
-_ඔබ group admin හෝ owner නම් auto-kick ලාගෙ exempt._
-
-${cfg.footer}`
-          );
+          return m.reply(`🔇 *Muted!* Your commands are being ignored.`);
         }
-        // Just warn — don't kick yet
+        // Just warn — don't mute yet
         return m.reply(
-          `⚠️ *Too fast!* Commands slow කරන්න.
-` +
-          `_(${strikes}/${STRIKE_LIMIT} warnings — ${STRIKE_LIMIT - strikes} more → temp block)_
-
-${cfg.footer}`
+          `⚠️ *Too fast!* Slow down your commands.\n` +
+          `_(${strikes}/${STRIKE_LIMIT} warnings \u2014 ${STRIKE_LIMIT - strikes} more → muted)_\n\n${cfg.footer}`
         );
       }
 
