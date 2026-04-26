@@ -197,13 +197,49 @@ body{
 
 /* INPUT */
 .input-wrap{position:relative;margin-bottom:12px}
-.flag-wrap{display:flex;gap:8px;align-items:center}
-.phone-flag{
-  background:rgba(37,211,102,0.04);border:1.5px solid rgba(37,211,102,0.12);
-  border-radius:12px;padding:0 14px;height:52px;display:flex;align-items:center;
-  font-size:.85rem;color:var(--sub);white-space:nowrap;font-family:'JetBrains Mono',monospace;
-  gap:6px;
-}
+.flag-wrap{display:flex;gap:8px;align-items:stretch}
+/* Country code selector */
+.cc-wrap{position:relative;flex-shrink:0}
+.cc-btn{display:flex;align-items:center;gap:6px;background:rgba(37,211,102,0.04);border:1.5px solid rgba(37,211,102,0.12);border-radius:12px;padding:0 12px;height:52px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:.85rem;font-weight:700;color:var(--g1);white-space:nowrap;user-select:none;transition:all .2s}
+.cc-btn:hover,.cc-btn.open{border-color:rgba(37,211,102,0.45);box-shadow:0 0 0 3px rgba(37,211,102,0.07)}
+.cc-flag{font-size:1.1rem;line-height:1}
+.cc-arrow{color:var(--sub);font-size:.65rem;transition:transform .2s}
+.cc-btn.open .cc-arrow{transform:rotate(180deg)}
+.cc-dropdown{position:absolute;top:calc(100% + 6px);left:0;z-index:50;background:#0a0f18;border:1.5px solid rgba(37,211,102,0.18);border-radius:14px;width:270px;max-height:280px;overflow:hidden;display:none;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.85)}
+.cc-dropdown.open{display:flex}
+.cc-search{padding:10px 12px;background:#070c12;border:none;border-bottom:1px solid rgba(37,211,102,0.1);color:var(--text);font-size:.84rem;outline:none}
+.cc-search::placeholder{color:var(--sub)}
+.cc-list{overflow-y:auto;flex:1}
+.cc-item{display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;font-size:.82rem;transition:background .15s}
+.cc-item:hover,.cc-item.selected{background:rgba(37,211,102,0.08);color:var(--g1)}
+.cc-item-flag{font-size:1.05rem;flex-shrink:0}
+.cc-item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--sub)}
+.cc-item:hover .cc-item-name,.cc-item.selected .cc-item-name{color:var(--text)}
+.cc-item-code{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--g1);font-size:.8rem}
+.phone-num-wrap{flex:1;position:relative}
+.phone-preview{font-size:.68rem;color:var(--sub);margin-top:4px;font-family:'JetBrains Mono',monospace;letter-spacing:.5px;padding-left:2px}
+.phone-preview span{color:var(--g1)}
+/* Visitor info panel */
+.vinfo-panel{background:rgba(6,10,20,0.7);border:1px solid rgba(37,211,102,0.07);border-radius:18px;padding:14px;margin:14px 0;position:relative;overflow:hidden}
+.vinfo-panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,229,255,0.35),rgba(162,89,255,0.18),transparent)}
+.vinfo-head{font-size:.54rem;letter-spacing:4px;text-transform:uppercase;color:var(--sub);font-family:'JetBrains Mono',monospace;margin-bottom:11px;display:flex;align-items:center;gap:8px}
+.vinfo-head::after{content:'';flex:1;height:1px;background:rgba(255,255,255,0.04)}
+.vinfo-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}
+.vinfo-item{background:rgba(255,255,255,0.018);border:1px solid rgba(255,255,255,0.04);border-radius:11px;padding:9px 11px;display:flex;align-items:center;gap:9px;transition:border-color .2s}
+.vinfo-item:hover{border-color:rgba(37,211,102,0.12)}
+.vinfo-item.full{grid-column:1/-1}
+.vinfo-icon{font-size:1rem;flex-shrink:0;line-height:1}
+.vinfo-label{font-size:.52rem;color:var(--sub);letter-spacing:2px;text-transform:uppercase;font-family:'JetBrains Mono',monospace;margin-bottom:2px}
+.vinfo-val{font-size:.76rem;font-weight:700;color:var(--text);font-family:'JetBrains Mono',monospace;word-break:break-all}
+.vinfo-val.loading{color:var(--sub);animation:vload .8s ease-in-out infinite}
+@keyframes vload{0%,100%{opacity:.35}50%{opacity:1}}
+.batt-bar-wrap{height:4px;background:rgba(255,255,255,0.06);border-radius:10px;overflow:hidden;margin-top:4px;width:100%}
+.batt-bar-fill{height:100%;border-radius:10px;transition:width 1s ease,background .5s}
+.batt-status-txt{font-size:.6rem;margin-top:3px;font-family:'JetBrains Mono',monospace;color:var(--sub)}
+.batt-status-txt.charging{color:var(--amber)}
+.signal-dots{display:flex;gap:2px;align-items:flex-end;margin-top:4px}
+.sdot-b{width:3px;border-radius:2px;background:var(--g1);opacity:.15}
+.sdot-b.on{opacity:1}
 input[type=text]{
   flex:1;background:rgba(37,211,102,0.03);
   border:1.5px solid rgba(37,211,102,0.1);
@@ -643,10 +679,76 @@ input[type=text]::placeholder{color:rgba(74,82,128,0.6)}
       </div>
     </div>
 
+    <!-- Visitor Info Panel -->
+    <div class="vinfo-panel">
+      <div class="vinfo-head">🖥️ Your Device Info</div>
+      <div class="vinfo-grid">
+        <div class="vinfo-item full">
+          <div class="vinfo-icon">🌐</div>
+          <div style="flex:1;min-width:0">
+            <div class="vinfo-label">IP Address</div>
+            <div class="vinfo-val loading" id="vi-ip">Fetching…</div>
+          </div>
+          <div style="font-size:.62rem;font-family:'JetBrains Mono',monospace;color:var(--sub);white-space:nowrap;text-align:right" id="vi-ctry"></div>
+        </div>
+        <div class="vinfo-item">
+          <div class="vinfo-icon">🔋</div>
+          <div style="flex:1">
+            <div class="vinfo-label">Battery</div>
+            <div class="vinfo-val loading" id="vi-batt">—</div>
+            <div class="batt-bar-wrap"><div class="batt-bar-fill" id="vi-bfill" style="width:0%"></div></div>
+            <div class="batt-status-txt" id="vi-bst"></div>
+          </div>
+        </div>
+        <div class="vinfo-item">
+          <div class="vinfo-icon">📶</div>
+          <div style="flex:1">
+            <div class="vinfo-label">Network</div>
+            <div class="vinfo-val loading" id="vi-net">—</div>
+            <div class="signal-dots" id="vi-sig">
+              <div class="sdot-b" style="height:4px"></div>
+              <div class="sdot-b" style="height:7px"></div>
+              <div class="sdot-b" style="height:10px"></div>
+              <div class="sdot-b" style="height:13px"></div>
+              <div class="sdot-b" style="height:16px"></div>
+            </div>
+          </div>
+        </div>
+        <div class="vinfo-item">
+          <div class="vinfo-icon">💻</div>
+          <div style="flex:1">
+            <div class="vinfo-label">Platform</div>
+            <div class="vinfo-val" id="vi-plat">—</div>
+          </div>
+        </div>
+        <div class="vinfo-item">
+          <div class="vinfo-icon">📐</div>
+          <div style="flex:1">
+            <div class="vinfo-label">Screen</div>
+            <div class="vinfo-val" id="vi-scr">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="form-wrap">
       <div class="flag-wrap">
-        <div class="phone-flag">🇱🇰 +94</div>
-        <input type="text" id="numIn" placeholder="771234567" maxlength="15" inputmode="numeric" style="border-radius:12px">
+        <!-- Country Code Selector -->
+        <div class="cc-wrap" id="ccWrap">
+          <div class="cc-btn" id="ccBtn" onclick="toggleCC()">
+            <span class="cc-flag" id="ccFlag">🇱🇰</span>
+            <span id="ccCode">+94</span>
+            <span class="cc-arrow">▼</span>
+          </div>
+          <div class="cc-dropdown" id="ccDropdown">
+            <input class="cc-search" id="ccSearch" type="text" placeholder="Search country…" oninput="filterCC(this.value)" autocomplete="off">
+            <div class="cc-list" id="ccList"></div>
+          </div>
+        </div>
+        <div class="phone-num-wrap">
+          <input type="text" id="numIn" placeholder="7X XXX XXXX" maxlength="13" inputmode="numeric" style="border-radius:12px;width:100%">
+          <div class="phone-preview">Full: <span id="previewNum">+94…</span></div>
+        </div>
         <button class="btn" id="pairBtn" onclick="startPair()">Get Code</button>
       </div>
       <div class="err-msg" id="err-msg"></div>
@@ -845,10 +947,74 @@ socket.on('session_update', ({userId, status, pairCode}) => {
   updateBadge(status);
 });
 
+/* ─── COUNTRY CODE SELECTOR ─── */
+const COUNTRIES=[{f:'🇱🇰',n:'Sri Lanka',c:'94'},{f:'🇮🇳',n:'India',c:'91'},{f:'🇵🇰',n:'Pakistan',c:'92'},{f:'🇧🇩',n:'Bangladesh',c:'880'},{f:'🇲🇻',n:'Maldives',c:'960'},{f:'🇺🇸',n:'United States',c:'1'},{f:'🇬🇧',n:'United Kingdom',c:'44'},{f:'🇦🇺',n:'Australia',c:'61'},{f:'🇨🇦',n:'Canada',c:'1'},{f:'🇩🇪',n:'Germany',c:'49'},{f:'🇫🇷',n:'France',c:'33'},{f:'🇮🇹',n:'Italy',c:'39'},{f:'🇪🇸',n:'Spain',c:'34'},{f:'🇳🇱',n:'Netherlands',c:'31'},{f:'🇧🇷',n:'Brazil',c:'55'},{f:'🇲🇽',n:'Mexico',c:'52'},{f:'🇦🇷',n:'Argentina',c:'54'},{f:'🇿🇦',n:'South Africa',c:'27'},{f:'🇳🇬',n:'Nigeria',c:'234'},{f:'🇰🇪',n:'Kenya',c:'254'},{f:'🇸🇦',n:'Saudi Arabia',c:'966'},{f:'🇦🇪',n:'UAE',c:'971'},{f:'🇶🇦',n:'Qatar',c:'974'},{f:'🇰🇼',n:'Kuwait',c:'965'},{f:'🇴🇲',n:'Oman',c:'968'},{f:'🇧🇭',n:'Bahrain',c:'973'},{f:'🇮🇶',n:'Iraq',c:'964'},{f:'🇯🇴',n:'Jordan',c:'962'},{f:'🇱🇧',n:'Lebanon',c:'961'},{f:'🇪🇬',n:'Egypt',c:'20'},{f:'🇲🇾',n:'Malaysia',c:'60'},{f:'🇸🇬',n:'Singapore',c:'65'},{f:'🇵🇭',n:'Philippines',c:'63'},{f:'🇮🇩',n:'Indonesia',c:'62'},{f:'🇹🇭',n:'Thailand',c:'66'},{f:'🇻🇳',n:'Vietnam',c:'84'},{f:'🇷🇺',n:'Russia',c:'7'},{f:'🇵🇱',n:'Poland',c:'48'},{f:'🇹🇷',n:'Turkey',c:'90'},{f:'🇷🇴',n:'Romania',c:'40'},{f:'🇺🇦',n:'Ukraine',c:'380'},{f:'🇸🇪',n:'Sweden',c:'46'},{f:'🇳🇴',n:'Norway',c:'47'},{f:'🇩🇰',n:'Denmark',c:'45'},{f:'🇫🇮',n:'Finland',c:'358'},{f:'🇨🇭',n:'Switzerland',c:'41'},{f:'🇦🇹',n:'Austria',c:'43'},{f:'🇧🇪',n:'Belgium',c:'32'},{f:'🇵🇹',n:'Portugal',c:'351'},{f:'🇬🇷',n:'Greece',c:'30'},{f:'🇯🇵',n:'Japan',c:'81'},{f:'🇰🇷',n:'South Korea',c:'82'},{f:'🇨🇳',n:'China',c:'86'},{f:'🇭🇰',n:'Hong Kong',c:'852'},{f:'🇹🇼',n:'Taiwan',c:'886'},{f:'🇳🇿',n:'New Zealand',c:'64'},{f:'🇮🇷',n:'Iran',c:'98'},{f:'🇦🇫',n:'Afghanistan',c:'93'},{f:'🇳🇵',n:'Nepal',c:'977'},{f:'🇲🇲',n:'Myanmar',c:'95'},{f:'🇲🇦',n:'Morocco',c:'212'},{f:'🇩🇿',n:'Algeria',c:'213'},{f:'🇿🇼',n:'Zimbabwe',c:'263'},{f:'🇬🇭',n:'Ghana',c:'233'}];
+let selectedCC=COUNTRIES[0];
+function buildCCList(q){const list=document.getElementById('ccList');const filtered=q?COUNTRIES.filter(c=>c.n.toLowerCase().includes(q.toLowerCase())||c.c.includes(q)):COUNTRIES;list.innerHTML=filtered.map(c=>`<div class="cc-item${c===selectedCC?' selected':''}" onclick="selectCC(${COUNTRIES.indexOf(c)})"><span class="cc-item-flag">${c.f}</span><span class="cc-item-name">${c.n}</span><span class="cc-item-code">+${c.c}</span></div>`).join('');}
+function toggleCC(){const btn=document.getElementById('ccBtn'),dd=document.getElementById('ccDropdown');const open=dd.classList.toggle('open');btn.classList.toggle('open',open);if(open){document.getElementById('ccSearch').value='';document.getElementById('ccSearch').focus();buildCCList('');}}
+function filterCC(q){buildCCList(q);}
+function selectCC(idx){selectedCC=COUNTRIES[idx];document.getElementById('ccFlag').textContent=selectedCC.f;document.getElementById('ccCode').textContent='+'+selectedCC.c;document.getElementById('ccDropdown').classList.remove('open');document.getElementById('ccBtn').classList.remove('open');updatePreview();}
+document.addEventListener('click',e=>{const w=document.getElementById('ccWrap');if(w&&!w.contains(e.target)){document.getElementById('ccDropdown').classList.remove('open');document.getElementById('ccBtn').classList.remove('open');}});
+function updatePreview(){const local=(document.getElementById('numIn').value||'').replace(/\s/g,'');document.getElementById('previewNum').textContent=local?'+'+selectedCC.c+local:'+'+selectedCC.c+'…';}
+function buildFullPhone(){return selectedCC.c+(document.getElementById('numIn').value||'').replace(/[\s\-]/g,'').replace(/^0+/,'');}
+document.getElementById('numIn').addEventListener('input',updatePreview);
+
+/* ─── VISITOR INFO ─── */
+(function(){
+  var ua=navigator.userAgent;
+  var plat='/Android/i'.test(ua)?'Android 📱':'/iPhone|iPad/i'.test(ua)?'iOS 📱':'/Windows/i'.test(ua)?'Windows 🖥️':'/Mac/i'.test(ua)?'macOS 💻':'/Linux/i'.test(ua)?'Linux 🐧':'Unknown';
+  if(/Android/i.test(ua))plat='Android 📱';
+  else if(/iPhone|iPad|iPod/i.test(ua))plat='iOS 📱';
+  else if(/Windows/i.test(ua))plat='Windows 🖥️';
+  else if(/Mac/i.test(ua))plat='macOS 💻';
+  else if(/Linux/i.test(ua))plat='Linux 🐧';
+  document.getElementById('vi-plat').textContent=plat;
+  document.getElementById('vi-scr').textContent=screen.width+'×'+screen.height;
+  // IP
+  fetch('https://api.ipify.org?format=json').then(r=>r.json()).then(d=>{
+    document.getElementById('vi-ip').textContent=d.ip||'N/A';
+    document.getElementById('vi-ip').classList.remove('loading');
+    return fetch('https://ip-api.com/json/'+d.ip+'?fields=country,countryCode');
+  }).then(r=>r.json()).then(d=>{
+    if(d&&d.country)document.getElementById('vi-ctry').textContent='🌍 '+d.country;
+  }).catch(()=>{document.getElementById('vi-ip').textContent='Unavailable';document.getElementById('vi-ip').classList.remove('loading');});
+  // Battery
+  if(navigator.getBattery){navigator.getBattery().then(b=>{
+    function upd(){
+      var pct=Math.round(b.level*100);
+      document.getElementById('vi-batt').textContent=pct+'%';
+      document.getElementById('vi-batt').classList.remove('loading');
+      var fill=document.getElementById('vi-bfill');
+      fill.style.width=pct+'%';
+      fill.style.background=pct>60?'var(--g1)':pct>25?'var(--amber)':'var(--red)';
+      var st=document.getElementById('vi-bst');
+      if(b.charging){st.textContent='⚡ Charging';st.className='batt-status-txt charging';}
+      else{var m=Math.round(b.dischargingTime/60);st.textContent=isFinite(m)?'~'+m+'min left':'Discharging';st.className='batt-status-txt';}
+    }
+    upd();b.addEventListener('levelchange',upd);b.addEventListener('chargingchange',upd);
+  });}else{document.getElementById('vi-batt').textContent='N/A';document.getElementById('vi-batt').classList.remove('loading');var f=document.getElementById('vi-bfill');f.style.width='100%';f.style.background='rgba(74,82,128,0.3)';}
+  // Network
+  var conn=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+  if(conn){
+    var tm={'4g':'4G LTE','3g':'3G','2g':'2G','slow-2g':'2G Slow','wifi':'WiFi','ethernet':'Ethernet'};
+    var t=conn.effectiveType||conn.type||'online';
+    document.getElementById('vi-net').textContent=(tm[t]||t.toUpperCase())+(conn.downlink?' · '+conn.downlink+'Mbps':'');
+    document.getElementById('vi-net').classList.remove('loading');
+    var bv={'4g':5,'3g':3,'2g':2,'slow-2g':1,'wifi':5,'ethernet':5};
+    var ab=bv[t]||3;
+    document.querySelectorAll('.sdot-b').forEach((b,i)=>{if(i<ab)b.classList.add('on');});
+  }else{
+    document.getElementById('vi-net').textContent=navigator.onLine?'Online':'Offline';
+    document.getElementById('vi-net').classList.remove('loading');
+    if(navigator.onLine)document.querySelectorAll('.sdot-b').forEach(b=>b.classList.add('on'));
+  }
+})();
+
 /* ─── PAIR ─── */
 async function startPair() {
-  const num = document.getElementById('numIn').value.replace(/[^0-9]/g,'');
-  if (num.length < 7) { showErr('Enter a valid phone number with country code'); return; }
+  const num = buildFullPhone();
+  const localPart = num.replace(selectedCC.c,'');
+  if (localPart.length < 5) { showErr('Enter a valid local phone number'); return; }
   curNum = num; hideErr(); setBusy(true);
   try {
     const r = await fetch('/api/pair', {
@@ -943,7 +1109,7 @@ function resetForm(){
   document.getElementById('blk-msg').classList.remove('show');
   document.getElementById('form-wrap').style.display='';
   document.getElementById('steps').style.display='';
-  document.getElementById('numIn').value=''; hideErr();
+  document.getElementById('numIn').value=''; updatePreview(); hideErr();
 }
 document.getElementById('numIn').addEventListener('keydown', e => { if(e.key==='Enter') startPair(); });
 
