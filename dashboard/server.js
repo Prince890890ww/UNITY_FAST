@@ -592,12 +592,18 @@ app.get('/api/channel-react', requireAuth, (req, res) => {
 
 app.post('/api/channel-react', requireAuth, async (req, res) => {
   try {
-    const { enabled, channelJid, emoji } = req.body;
+    const { enabled, channelJid, emoji, postLink } = req.body;
     // Normalize: accept full link or bare JID
     let jid = (channelJid || '').trim();
     const m = jid.match(/whatsapp\.com\/channel\/([\w-]+)/);
     if (m) jid = m[1] + '@newsletter';
     else if (jid && !jid.endsWith('@newsletter')) jid += '@newsletter';
+
+    // Extract message ID from post link if provided
+    // Format: https://whatsapp.com/channel/CHANNEL_ID/MESSAGE_ID
+    const postLinkStr = (postLink || '').trim();
+    const postMsgMatch = postLinkStr.match(/whatsapp\.com\/channel\/[\w-]+\/([\w-]+)/);
+    const postMsgId = postMsgMatch ? postMsgMatch[1] : null;
 
     const savedEmoji = (emoji || '❤️').trim() || '❤️';
     const cfg2 = { enabled: !!enabled, channelJid: jid, emoji: savedEmoji };
@@ -616,7 +622,10 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
 
     // ── Helper: try multiple fetch method names ───────────────
     async function fetchLatestMsgId(sock, channelJid) {
-      // Priority 1: stored ID from autoHandler (most reliable)
+      // Priority 0: post link message ID from panel (100% reliable)
+      if (postMsgId) return postMsgId;
+
+      // Priority 1: stored ID from autoHandler (reliable)
       try {
         const stored = readCarConfig();
         if (stored.latestMsgId) return stored.latestMsgId;
