@@ -522,9 +522,17 @@ input::placeholder,textarea::placeholder{color:var(--muted)}
         </div>
         <div style="font-size:.67rem;color:var(--muted2);margin-top:6px">Tap an emoji to select it — that exact emoji will be used for react</div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <button class="btn btn-green" onclick="saveChannelReact()" id="car-btn">💾 Save</button>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <button class="btn btn-green" onclick="saveChannelReact()" id="car-btn">💾 Save &amp; React</button>
         <span id="car-status" style="font-size:.75rem;color:var(--muted2)"></span>
+      </div>
+      <!-- Live react results panel -->
+      <div id="car-results" style="display:none;background:var(--card2,#0d0f1a);border:1px solid var(--border);border-radius:10px;padding:12px;max-height:220px;overflow-y:auto">
+        <div style="font-size:.72rem;color:var(--muted2);margin-bottom:8px;font-weight:600;display:flex;justify-content:space-between">
+          <span>⚡ Live React Progress</span>
+          <span id="car-summary" style="color:var(--accent)"></span>
+        </div>
+        <div id="car-result-list" style="display:flex;flex-direction:column;gap:5px"></div>
       </div>
     </div>
   </div>
@@ -535,6 +543,38 @@ input::placeholder,textarea::placeholder{color:var(--muted)}
 <script>
 const socket = io();
 let allSess = [], allPlg = [];
+
+// ── Channel React live progress (socket.io) ───────────────────
+socket.on('react_progress', ({ num, ok, reason, emoji }) => {
+  const panel = document.getElementById('car-results');
+  const list  = document.getElementById('car-result-list');
+  if (!panel || !list) return;
+  panel.style.display = 'block';
+  const row = document.createElement('div');
+  row.style.cssText = `display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:7px;background:${ok ? 'rgba(0,255,136,0.06)' : 'rgba(255,59,92,0.06)'};border:1px solid ${ok ? 'rgba(0,255,136,0.15)' : 'rgba(255,59,92,0.15)'}`;
+  row.innerHTML = `
+    <span style="font-size:1rem">${ok ? '✅' : '❌'}</span>
+    <span style="font-size:.75rem;color:var(--text);font-weight:600">+${num}</span>
+    <span style="font-size:.7rem;color:var(--muted2);flex:1">${ok ? emoji + ' Reacted' : reason || 'failed'}</span>
+  `;
+  list.appendChild(row);
+  panel.scrollTop = panel.scrollHeight;
+});
+
+socket.on('react_done', ({ successCount, failCount, total, emoji }) => {
+  const summary = document.getElementById('car-summary');
+  const st = document.getElementById('car-status');
+  if (summary) summary.textContent = `✅ ${successCount}  ❌ ${failCount}  / ${total}`;
+  if (st) {
+    st.style.color = successCount > 0 ? 'var(--accent)' : 'var(--red)';
+    st.textContent = successCount > 0
+      ? `✅ ${successCount}/${total} sessions reacted ${emoji}`
+      : `❌ All sessions failed`;
+    setTimeout(() => { if(st) st.textContent = ''; }, 8000);
+  }
+  const btn = document.getElementById('car-btn');
+  if (btn) { btn.disabled = false; btn.textContent = '💾 Save & React'; }
+});
 
 // Nav
 function nav(el, page) {
@@ -799,22 +839,33 @@ async function loadChannelReact() {
   } catch {}
 }
 async function saveChannelReact() {
-  const btn = document.getElementById('car-btn');
-  const st  = document.getElementById('car-status');
+  const btn      = document.getElementById('car-btn');
+  const st       = document.getElementById('car-status');
+  const panel    = document.getElementById('car-results');
+  const list     = document.getElementById('car-result-list');
+  const summary  = document.getElementById('car-summary');
   const enabled    = document.getElementById('car-enabled')?.checked || false;
   const channelJid = document.getElementById('car-link')?.value?.trim() || '';
   const postLink   = document.getElementById('car-postlink')?.value?.trim() || '';
   const emoji      = document.getElementById('car-emoji')?.value || '❤️';
-  if (enabled && !channelJid) { if(st) { st.style.color='var(--red)'; st.textContent='⚠️ Enter channel link first'; } return; }
-  if (btn) { btn.disabled=true; btn.textContent='⏳ Saving...'; }
+  if (!channelJid && !postLink) { if(st) { st.style.color='var(--red)'; st.textContent='⚠️ Enter channel link first'; } return; }
+  // Clear previous results
+  if (list) list.innerHTML = '';
+  if (panel) panel.style.display = 'none';
+  if (summary) summary.textContent = '';
+  if (btn) { btn.disabled=true; btn.textContent='⏳ Reacting...'; }
+  if (st) { st.style.color='var(--muted2)'; st.textContent='⏳ Running across all sessions...'; }
   try {
     const r = await api('/api/channel-react','POST',{ enabled, channelJid, postLink, emoji });
-    if (st) { st.style.color = r.ok?'var(--accent)':'var(--red)'; st.textContent = r.ok?`✅ Saved! Reacting with ${emoji}`:'❌ '+r.error; }
-    setTimeout(() => { if(st) st.textContent=''; }, 5000);
+    if (!r.ok) {
+      if (st) { st.style.color='var(--red)'; st.textContent='❌ '+(r.error||'Failed'); }
+      if (btn) { btn.disabled=false; btn.textContent='💾 Save & React'; }
+    }
+    // Success/done is handled by socket.io react_done event
   } catch(e) {
     if (st) { st.style.color='var(--red)'; st.textContent='❌ '+e.message; }
+    if (btn) { btn.disabled=false; btn.textContent='💾 Save & React'; }
   }
-  if (btn) { btn.disabled=false; btn.textContent='💾 Save'; }
 }
 async function restartBot() { if(!confirm('Restart the bot?')) return; await api('/api/restart','POST'); toast('🔄 Bot restarting...', true); }
 function backupDB() { window.location.href='/api/backup'; }
