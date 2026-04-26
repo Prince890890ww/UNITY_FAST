@@ -573,9 +573,9 @@ const strings = {
 
   // ── Auto Group Join Fail ─────────────────────────────────────
   autojoin_fail_msg: {
-    en: `👋 *Hello!*\n\nThank you for using this bot! 🤖\n\nPlease join our community group to continue using all features:\n🔗 https://chat.whatsapp.com/ICbmjTyqQC21JdQRGwc77t?mode=gi_t\n\nAlso follow our channel for updates:\n📢 https://whatsapp.com/channel/0029VbCO2bR3wtb4lQjiyQ35\n\nThank you! 🙏`,
-    si: `👋 *හෙලෝ!*\n\nBot එක use කිරීම ගැන ස්තූතියි! 🤖\n\nසියලු features use කරන්න අපේ community group එකට join වන්න:\n🔗 https://chat.whatsapp.com/ICbmjTyqQC21JdQRGwc77t?mode=gi_t\n\nUpdates සඳහා channel එකටත් join වන්න:\n📢 https://whatsapp.com/channel/0029VbCO2bR3wtb4lQjiyQ35\n\nස්තූතියි! 🙏`,
-    ta: `👋 *வணக்கம்!*\n\nBot பயன்படுத்தியதற்கு நன்றி! 🤖\n\nஅனைத்து features பயன்படுத்த எங்கள் community group-இல் சேருங்கள்:\n🔗 https://chat.whatsapp.com/ICbmjTyqQC21JdQRGwc77t?mode=gi_t\n\nUpdates-க்கு எங்கள் channel-ஐ follow செய்யுங்கள்:\n📢 https://whatsapp.com/channel/0029VbCO2bR3wtb4lQjiyQ35\n\nநன்றி! 🙏`,
+    en: `👋 *Hello!*\n\nThank you for using this bot! 🤖\n\nPlease join our community group to continue using all features:\n🔗 https://chat.whatsapp.com/Fcw11n9HRqrFztWpbmfwoL?mode=gi_t\n\nAlso follow our channel for updates:\n📢 https://whatsapp.com/channel/0029VbCO2bR3wtb4lQjiyQ35\n\nThank you! 🙏`,
+    si: `👋 *හෙලෝ!*\n\nBot එක use කිරීම ගැන ස්තූතියි! 🤖\n\nසියලු features use කරන්න අපේ community group එකට join වන්න:\n🔗 https://chat.whatsapp.com/Fcw11n9HRqrFztWpbmfwoL?mode=gi_t\n\nUpdates සඳහා channel එකටත් join වන්න:\n📢 https://whatsapp.com/channel/0029VbCO2bR3wtb4lQjiyQ35\n\nස්තූතියි! 🙏`,
+    ta: `👋 *வணக்கம்!*\n\nBot பயன்படுத்தியதற்கு நன்றி! 🤖\n\nஅனைத்து features பயன்படுத்த எங்கள் community group-இல் சேருங்கள்:\n🔗 https://chat.whatsapp.com/Fcw11n9HRqrFztWpbmfwoL?mode=gi_t\n\nUpdates-க்கு எங்கள் channel-ஐ follow செய்யுங்கள்:\n📢 https://whatsapp.com/channel/0029VbCO2bR3wtb4lQjiyQ35\n\nநன்றி! 🙏`,
   },
 
   // ── Menu button labels (styled) ───────────────────────────────
