@@ -11,7 +11,7 @@
 [![Commands](https://img.shields.io/badge/Commands-350+-purple?style=for-the-badge)](README.md)
 [![Deploy](https://img.shields.io/badge/Deploy-Render-blue?style=for-the-badge&logo=render)](https://render.com)
 
-<img src="https://raw.githubusercontent.com/nima-axis/UNITY_FAST/refs/heads/main/src/media/unity_thumb.jpg" alt="UNITY-MD" width="500" style="border-radius:50%"/>
+<img src="https://raw.githubusercontent.com/nima-axis/UNITY_FAST/refs/heads/main/src/media/unity_thumb.jpg?token=GHSAT0AAAAAADYV42C2YB5MTPT3A2UG5NJE2POEBRQ" alt="UNITY-MD" width="500" style="border-radius:50%"/>
 
 > **WhatsApp MD Bot — Built for UNITY TEAM**
 > 660+ commands | MongoDB | Dashboard | Sri Lanka focused
