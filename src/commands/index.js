@@ -177,6 +177,8 @@ const botConfigSchema = new mongoose.Schema({
     endsAt:    Date,
     active:    { type: Boolean, default: true },
   }],
+  // First ever deployment time — set once, never overwritten on restarts
+  firstBootAt: { type: Date, default: null },
 }, { versionKey: false });
 
 // ── Models ────────────────────────────────────────────────────
@@ -241,6 +243,23 @@ async function getBotConfig(sessionId = 'config') {
     sessionId,
     { $setOnInsert: { _id: sessionId } },
     { upsert: true, new: true }
+  );
+}
+
+// Set firstBootAt only if it has never been set before (survives restarts/updates)
+async function setFirstBootTime(sessionId = 'config') {
+  await BotConfig.findByIdAndUpdate(
+    sessionId,
+    [
+      {
+        $set: {
+          firstBootAt: {
+            $cond: [{ $eq: ['$firstBootAt', null] }, new Date(), '$firstBootAt'],
+          },
+        },
+      },
+    ],
+    { upsert: true }
   );
 }
 
@@ -339,4 +358,5 @@ module.exports = {
   warnUser,
   resetWarns,
   getStats,
+  setFirstBootTime,
 };
