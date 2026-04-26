@@ -525,23 +525,38 @@ ${cfg.footer}`);
     if (m.isGroup && m.isCmd) {
       const _msgKey = `${m.chat}::${m.id}`;
 
-      // Already claimed by this bot instance?
-      if (global._claimedCmds && global._claimedCmds.has(_msgKey)) return;
-
-      // Already claimed by another bot? (via reaction event listener)
-      if (global._externalClaims && global._externalClaims.has(_msgKey)) return;
-
-      // Claim immediately (atomic within same process — global is shared)
+      // ── Same-process guard (immediate, atomic) ─────────────────
       if (!global._claimedCmds) global._claimedCmds = new Map();
-      if (global._claimedCmds.has(_msgKey)) return; // another session just claimed it
-      global._claimedCmds.set(_msgKey, Date.now()); // claim NOW before any await
+      if (global._claimedCmds.has(_msgKey)) return;
+      global._claimedCmds.set(_msgKey, Date.now()); // claim before any await
 
-      // React ⚙️ — other bots in the group see this via messages.upsert
+      // ── Cross-server guard (reaction based) ────────────────────
+      // Already claimed by a bot on another server?
+      if (global._externalClaims && global._externalClaims.has(_msgKey)) {
+        global._claimedCmds.delete(_msgKey); // release local claim
+        return;
+      }
+
+      // Deterministic delay: hash of bot JID → same bot ALWAYS wins
+      // across restarts for a given group (no random race).
+      const _botJid  = sock.user?.id || '';
+      const _jidHash = _botJid.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) & 0xffff, 0);
+      const _delay   = 50 + (_jidHash % 200); // 50–249 ms, consistent per bot
+
+      await new Promise(r => setTimeout(r, _delay));
+
+      // After delay: did another server claim it?
+      if (global._externalClaims && global._externalClaims.has(_msgKey)) {
+        global._claimedCmds.delete(_msgKey);
+        return;
+      }
+
+      // We win — signal to other servers via ⚙️ reaction
       try {
         await sock.sendMessage(m.chat, { react: { text: '⚙️', key: m.key } });
       } catch {}
 
-      // Expire old entries every ~5 min to avoid memory growth
+      // Expire old entries
       if (global._claimedCmds.size > 500) {
         const _now = Date.now();
         for (const [k, t] of global._claimedCmds) {
