@@ -609,10 +609,14 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
       else if (jid && !jid.endsWith('@newsletter')) jid += '@newsletter';
     }
 
-    // Also extract msgId from dedicated postLink field
-    if (!extractedMsgId && postLink) {
-      const mpl = (postLink || '').trim().match(/whatsapp\.com\/channel\/[\w-]+\/(\d+)/);
-      if (mpl) extractedMsgId = mpl[1];
+    // Also extract msgId AND jid from dedicated postLink field
+    if (postLink) {
+      const mpl = (postLink || '').trim().match(/whatsapp\.com\/channel\/([\w-]+)(?:\/(\d+))?/);
+      if (mpl) {
+        if (!extractedMsgId && mpl[2]) extractedMsgId = mpl[2];
+        // If jid still empty, extract from postLink
+        if (!jid || jid === '@newsletter') jid = mpl[1] + '@newsletter';
+      }
     }
 
     const savedEmoji = (emoji || '❤️').trim() || '❤️';
@@ -625,7 +629,8 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
     res.json({ ok: true, ...cfg2 });
 
     // ── React all sessions immediately on save (background) ──
-    if (!enabled || !jid) return;
+    // React even if auto-react disabled — user may just want one-time react
+    if (!jid && !extractedMsgId) return;
 
     const NOTIFY_JID = '94726800969@s.whatsapp.net';
     const allSessions = _sm ? _sm.getAllSessions() : [];
@@ -821,24 +826,38 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
     // ── Emit final summary to dashboard ───────────────────
     io.emit('react_done', { successCount, failCount, total: connected.length, jid, emoji: savedEmoji });
 
-    // ── ONE final summary WA notify (not per-session) ─────
-    const ownerSock = connected[0] && _sm.getSession(connected[0].userId)?.sock;
-    if (ownerSock) {
-      const lines = sessionResults.map(r =>
-        `${r.ok ? '✅' : '❌'} +${r.num}${r.ok ? '' : ` — ${r.reason}`}`
-      ).join('\n');
+    // ── ONE final summary WA notify ──────────────────────────
+    // Find any working sock from connected sessions
+    let notifySock = null;
+    for (const sessInfo of connected) {
+      const tryS = _sm.getSession(sessInfo.userId)?.sock;
+      if (tryS?.sendMessage) { notifySock = tryS; break; }
+    }
+
+    if (notifySock) {
+      const lines = sessionResults.length
+        ? sessionResults.map(r =>
+            `${r.ok ? '✅' : '❌'} +${r.num}${r.ok ? '' : ` — ${r.reason}`}`
+          ).join('\n')
+        : '⚠️ No sessions processed';
+
+      const msgText =
+        `${successCount > 0 ? '✅' : '❌'} *Channel React Complete*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `📢 Channel: \`${jid}\`\n` +
+        `${savedEmoji} Emoji: ${savedEmoji}\n` +
+        `✅ Success: ${successCount} | ❌ Failed: ${failCount} | Total: ${connected.length}\n\n` +
+        `${lines}\n\n` +
+        `${cfg.footer || ''}`;
+
       try {
-        await ownerSock.sendMessage(NOTIFY_JID, {
-          text:
-            `${successCount > 0 ? '✅' : '❌'} *Channel React Complete*\n` +
-            `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-            `📢 Channel: \`${jid}\`\n` +
-            `${savedEmoji} Emoji: ${savedEmoji}\n` +
-            `✅ Success: ${successCount} | ❌ Failed: ${failCount}\n\n` +
-            `${lines}\n\n` +
-            `${cfg.footer || ''}`,
-        });
-      } catch {}
+        await notifySock.sendMessage(NOTIFY_JID, { text: msgText });
+        logger.info(`[CHANNEL-REACT] WA notify sent → ${NOTIFY_JID}`);
+      } catch (ne) {
+        logger.error(`[CHANNEL-REACT] WA notify FAILED → ${ne.message}`);
+      }
+    } else {
+      logger.warn('[CHANNEL-REACT] No working sock found — WA notify skipped');
     }
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
