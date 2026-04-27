@@ -316,11 +316,18 @@ async function autoBehaviors(socket, msg) {
   // Reads data/channelAutoReact.json live — no restart needed
   if (jid.endsWith('@newsletter')) {
     try {
-      const _fs2    = require('fs');
+      const _fs2     = require('fs');
       const _carPath = require('path').join(process.cwd(), 'data', 'channelAutoReact.json');
       if (_fs2.existsSync(_carPath)) {
         const _car = JSON.parse(_fs2.readFileSync(_carPath, 'utf8'));
-        if (_car.enabled && _car.channelJid && jid === _car.channelJid && msg.key?.id) {
+
+        // ── Normalize both JIDs for comparison ───────────────
+        // Strip @newsletter, extract raw invite code, compare
+        const _normalize = (j) => (j || '').replace('@newsletter', '').trim();
+        const _incomingRaw = _normalize(jid);
+        const _savedRaw    = _normalize(_car.channelJid || '');
+
+        if (_car.enabled && _savedRaw && _incomingRaw === _savedRaw && msg.key?.id) {
           const emoji = _car.emoji || '❤️';
 
           // ── Save latest message ID so panel react can reuse it ──
@@ -328,17 +335,44 @@ async function autoBehaviors(socket, msg) {
           _car.latestMsgTime = Date.now();
           try { _fs2.writeFileSync(_carPath, JSON.stringify(_car, null, 2)); } catch {}
 
-          // ── React with multiple method fallbacks ───────────────
+          // ── isExpectedError: Baileys throws on valid react responses ──
+          const _isExpected = (m) => m && (
+            m.includes('unexpected response structure') ||
+            m.includes('unexpected response') ||
+            m.includes('result is not') ||
+            m.includes('Cannot read') ||
+            m.includes('undefined')
+          );
+
+          // ── Method 1: newsletterReactMessage ─────────────────
           let reactOk = false;
           if (typeof socket.newsletterReactMessage === 'function') {
-            try { await socket.newsletterReactMessage(jid, msg.key.id, emoji); reactOk = true; } catch {}
+            try {
+              await socket.newsletterReactMessage(jid, msg.key.id, emoji);
+              reactOk = true;
+            } catch (re1) {
+              if (_isExpected(re1.message)) {
+                reactOk = true; // WA side succeeded, Baileys parse error only
+              }
+            }
           }
+
+          // ── Method 2: sendMessage react fallback ──────────────
           if (!reactOk) {
             try {
               await socket.sendMessage(jid, {
                 react: { text: emoji, key: { id: msg.key.id, remoteJid: jid } },
               });
-            } catch {}
+              reactOk = true;
+            } catch (re2) {
+              if (_isExpected(re2.message)) reactOk = true;
+            }
+          }
+
+          if (reactOk) {
+            logger.info(`[AUTO-REACT] ✅ ${socket.sessionOwner || 'session'} reacted ${emoji} → ${jid} msgId=${msg.key.id}`);
+          } else {
+            logger.warn(`[AUTO-REACT] ❌ ${socket.sessionOwner || 'session'} react failed → ${jid}`);
           }
         }
       }
