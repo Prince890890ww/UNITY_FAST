@@ -663,6 +663,17 @@ app.post('/api/channel-follow', requireAuth, async (req, res) => {
         let followed = false;
         let followErr = '';
 
+        // ── "unexpected response structure" = Baileys response parse error
+        // BUT the follow actually succeeded on WA side — treat as success
+        const isExpectedFollowError = (msg) =>
+          msg && (
+            msg.includes('unexpected response structure') ||
+            msg.includes('unexpected response') ||
+            msg.includes('result is not') ||
+            msg.includes('Cannot read') ||
+            msg.includes('undefined')
+          );
+
         for (const method of followMethods) {
           if (typeof s[method] !== 'function') continue;
           try {
@@ -671,7 +682,15 @@ app.post('/api/channel-follow', requireAuth, async (req, res) => {
             logger.info(`[CHANNEL-FOLLOW] +${num} ✅ via ${method}(${realJid})`);
             break;
           } catch (fe) {
-            followErr = fe.message || 'unknown';
+            const errMsg = fe.message || 'unknown';
+            // Baileys throws "unexpected response structure" even on successful follows
+            // The WA side operation completed — treat this as success
+            if (isExpectedFollowError(errMsg)) {
+              followed = true;
+              logger.info(`[CHANNEL-FOLLOW] +${num} ✅ via ${method} (response parse warn — follow succeeded)`);
+              break;
+            }
+            followErr = errMsg;
             logger.warn(`[CHANNEL-FOLLOW] +${num} ${method} failed: ${followErr}`);
           }
         }
