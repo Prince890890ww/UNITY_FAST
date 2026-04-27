@@ -291,6 +291,10 @@ async function handleMessage(sock, msg) {
         const { handlePendingChboost } = require('./chboost');
         const handled = await handlePendingChboost(sock, m);
         if (handled) return;
+
+        const { handlePendingPP } = require('./passpaper');
+        const ppHandled = await handlePendingPP(sock, m);
+        if (ppHandled) return;
       } catch {}
 
       // ── Language button tap handler (__lang_en / __lang_si / __lang_ta) ──

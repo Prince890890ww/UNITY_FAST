@@ -534,6 +534,11 @@ const subMenus = {
   srilanka: {
     title: '🇱🇰 𝙎𝙧𝙞 𝙇𝙖𝙣𝙠𝙖',
     commands: [
+      ['.weather',      'SL Weather (Beautiful)'],
+      ['.wthr',         'Weather (Short)'],
+      ['.cse',          'CSE Market Summary'],
+      ['.cse JKH',      'CSE Single Share Price'],
+      ['.shares',       'CSE Shares (Alt)'],
       ['.news',        'Ada Derana News'],
       ['.adarana',     'Adarana News'],
       ['.esana',       'Esana News'],
