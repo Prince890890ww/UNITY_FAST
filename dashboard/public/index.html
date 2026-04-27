@@ -501,9 +501,9 @@ input::placeholder,textarea::placeholder{color:var(--muted)}
         <div style="font-size:.68rem;color:var(--muted2);margin-top:5px">Paste channel link or JID — all sessions will react to every new post</div>
       </div>
       <div style="margin-bottom:14px">
-        <div style="font-size:.75rem;color:var(--muted2);margin-bottom:6px;font-weight:600">Post Link <span style="font-weight:400;opacity:.6">(Save කරද්දි react කරන්න)</span></div>
+        <div style="font-size:.75rem;color:var(--muted2);margin-bottom:6px;font-weight:600">Post Link <span style="font-weight:400;opacity:.6">(React on Save)</span></div>
         <input id="car-postlink" type="text" placeholder="https://whatsapp.com/channel/xxx/MESSAGE_ID" style="width:100%;background:var(--card2,#0d0f1a);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 13px;font-size:.8rem;outline:none;box-sizing:border-box">
-        <div style="font-size:.68rem;color:var(--muted2);margin-top:5px">Channel post long-press → Copy link → Paste කරන්න. Save කළාම හැම session ල්හින් react කරයි.</div>
+        <div style="font-size:.68rem;color:var(--muted2);margin-top:5px">Long-press channel post → Copy link → Paste here. All sessions will react on Save.</div>
       </div>
       <div style="margin-bottom:14px">
         <div style="font-size:.75rem;color:var(--muted2);margin-bottom:8px;font-weight:600">React Emoji</div>
@@ -548,7 +548,7 @@ input::placeholder,textarea::placeholder{color:var(--muted)}
       <div style="margin-bottom:14px">
         <div style="font-size:.75rem;color:var(--muted2);margin-bottom:6px;font-weight:600">Channel Link or JID</div>
         <input id="caf-link" type="text" placeholder="https://whatsapp.com/channel/... or JID" style="width:100%;background:var(--card2,#0d0f1a);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 13px;font-size:.8rem;outline:none;box-sizing:border-box">
-        <div style="font-size:.68rem;color:var(--muted2);margin-top:5px">Channel link paste කරන්න — Save කළාම හැම session එකෙන්ම follow කරයි</div>
+        <div style="font-size:.68rem;color:var(--muted2);margin-top:5px">Paste channel link — all sessions will follow on Save</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
         <button class="btn btn-green" onclick="saveChannelFollow()" id="caf-btn">➕ Follow Now</button>
@@ -848,7 +848,7 @@ async function saveChannelFollow() {
   const list  = document.getElementById('caf-result-list');
   const sum   = document.getElementById('caf-summary');
   const link  = document.getElementById('caf-link')?.value?.trim() || '';
-  if (!link) { if(st) { st.style.color='var(--red)'; st.textContent='⚠️ Channel link paste කරන්න'; } return; }
+  if (!link) { if(st) { st.style.color='var(--red)'; st.textContent='⚠️ Paste a channel link first'; } return; }
   if (list) list.innerHTML = '';
   if (panel) panel.style.display = 'none';
   if (sum) sum.textContent = '';
