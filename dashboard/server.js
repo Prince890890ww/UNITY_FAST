@@ -717,8 +717,6 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
       }
 
       return { ok: false, reason: 'all methods failed — check server logs' };
-      }
-      return { ok: false };
     }
 
     // ── Main: fetch posts + react with all fallbacks ───────────
