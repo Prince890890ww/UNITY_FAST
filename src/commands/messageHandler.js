@@ -208,6 +208,30 @@ async function handleMessage(sock, msg) {
       } catch {}
     }
 
+    // ── Reply-number handler: treat "1", "2"... as button taps ──
+    if (!m.isCmd && !m.key?.fromMe) {
+      const numBody = (m.body || '').trim();
+      if (/^\d+$/.test(numBody)) {
+        const idx = parseInt(numBody, 10) - 1;
+        const pending = global.pendingButtonReplies?.get(m.chat);
+        if (pending && idx >= 0 && idx < pending.length) {
+          const fakeId = pending[idx];
+          global.pendingButtonReplies.delete(m.chat);
+          const pfx = cfg.prefixes.find(p => fakeId.startsWith(p));
+          if (pfx) {
+            const withoutPrefix = fakeId.slice(pfx.length).trim();
+            const [cmd2, ...args2] = withoutPrefix.split(' ');
+            m.body        = fakeId;
+            m.command     = cmd2.toLowerCase();
+            m.args        = args2;
+            m.text        = args2.join(' ');
+            m.isCmd       = true;
+            m.isButtonTap = true;
+          }
+        }
+      }
+    }
+
     // ── Auto AI Reply — runs BEFORE checkMode (replies to all users) ──
     if (!m.isCmd && !m.key?.fromMe && m.body?.trim()) {
       try {
@@ -355,6 +379,8 @@ async function handleMessage(sock, msg) {
             `━━━━━━━━━━━━━━━━━━━━━━\n` +
             `Current: *${langNames[cur] || cur}*\n\n` +
             `Select a language:\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `💡 Or type: *.lang en* / *.lang si* / *.lang ta*\n` +
             `━━━━━━━━━━━━━━━━━━━━━━\n${cfg.footer}`,
           footer: cfg.footer,
           buttons: [
@@ -388,6 +414,8 @@ async function handleMessage(sock, msg) {
                 `🌐 *Select Bot Language*\n` +
                 `━━━━━━━━━━━━━━━━━━━━━━\n` +
                 `${t('lang_choose', 'en')}\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                `💡 Or type: *.lang en* / *.lang si* / *.lang ta*\n` +
                 `━━━━━━━━━━━━━━━━━━━━━━\n${cfg.footer}`,
               footer: cfg.footer,
               buttons: [

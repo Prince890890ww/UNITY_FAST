@@ -199,6 +199,12 @@ async function sendButtons(sock, jid, { text, footer = '', buttons = [], quoted 
     buttons = [...buttons, { label: '📋 Menu', id: '.menu' }];
   }
 
+  // ── Reply-number support: append numbered list + store mapping ──
+  if (!global.pendingButtonReplies) global.pendingButtonReplies = new Map();
+  const numberedLines = buttons.map((b, i) => `  *${i + 1}.* ${b.label}`).join('\n');
+  text = `${text}\n\n${numberedLines}\n\n_↩ reply with a number_`;
+  global.pendingButtonReplies.set(jid, buttons.map(b => b.id));
+
   const {
     generateWAMessageFromContent,
     proto,
