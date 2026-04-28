@@ -61,8 +61,8 @@ async function main() {
   startDashboard(sessionManager);
 
   // ── Telegram bots ─────────────────────────────────────────
-  startPairBot().catch(e => console.error('[TG-PAIR] Start failed:', e.message));
-  startMgmtBot().catch(e => console.error('[TG-MGMT] Start failed:', e.message));
+  Promise.resolve(startPairBot()).catch(e => console.error('[TG-PAIR] Start failed:', e.message));
+  Promise.resolve(startMgmtBot()).catch(e => console.error('[TG-MGMT] Start failed:', e.message));
 
   console.log(chalk.green('\n[🚀] UNITY-MD Multi-User running!\n'));
 
