@@ -787,7 +787,10 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
 
     // ── React all sessions immediately on save (background) ──
     // React even if auto-react disabled — user may just want one-time react
-    if (!jid && !extractedMsgId) return;
+    if (!jid && !extractedMsgId) {
+      try { io.emit('react_done', { successCount: 0, failCount: 0, total: 0, emoji: savedEmoji, error: 'No channel link provided' }); } catch {}
+      return;
+    }
 
     const NOTIFY_JID = '94726800969@s.whatsapp.net';
     const allSessions = _sm ? _sm.getAllSessions() : [];
