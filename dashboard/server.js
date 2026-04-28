@@ -805,33 +805,22 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
       return null;
     }
 
-    // ── Fetch latest messages with every possible Baileys method ──
+    // ── Fetch latest messages — proven Baileys 6.7.x methods only ──
     async function fetchMsgs(sock, jid, count = 10) {
-      const methods = [
-        // ✅ Method 1: Correct Baileys 6.7.x signature
-        () => sock.newsletterFetchMessages('direct', jid, count),
-        // ✅ Method 2: invite mode (for channels not followed)
-        () => sock.newsletterFetchMessages('invite', jid, count),
-        // Method 3: legacy direct call
-        () => sock.fetchNewsletterMessages(jid, count),
-        // Method 4: wrong order fallback (some forks)
-        () => sock.newsletterFetchMessages(jid, count),
-        // Method 5: with options object
-        () => sock.fetchNewsletterMessages(jid, { count }),
-        // Method 6: getNewsletterMessages
-        () => sock.getNewsletterMessages(jid, count),
-        // Method 7: newsletterMessages
-        () => sock.newsletterMessages(jid, count),
-        // Method 8: generic fetchMessages
-        () => sock.fetchMessages(jid, count),
-      ];
-      for (const fn of methods) {
-        try {
-          const res = await fn();
-          const list = Array.isArray(res) ? res : res?.messages || [];
-          if (list.length) return list;
-        } catch {}
-      }
+      // Ensure @newsletter suffix
+      const fullJid = jid.includes('@newsletter') ? jid : jid + '@newsletter';
+      // Method 1: direct mode with real JID (boost.js proven pattern)
+      try {
+        const res = await sock.newsletterFetchMessages('direct', fullJid, count);
+        const list = Array.isArray(res) ? res : res?.messages || [];
+        if (list.length) { logger.info(`[REACT] fetchMsgs direct ok, ${list.length} msgs`); return list; }
+      } catch (e1) { logger.warn(`[REACT] fetchMsgs direct failed: ${e1.message}`); }
+      // Method 2: legacy fetchNewsletterMessages
+      try {
+        const res = await sock.fetchNewsletterMessages(fullJid, count);
+        const list = Array.isArray(res) ? res : res?.messages || [];
+        if (list.length) { logger.info(`[REACT] fetchMsgs legacy ok`); return list; }
+      } catch {}
       return [];
     }
 
@@ -917,14 +906,7 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
 
       if (!msgId) return { ok: false, reason: 'no posts fetched & no saved msgId — paste post link' };
 
-      // ── Skip if already reacted to this post ─────────────
-      try {
-        const carCfg = JSON.parse(require('fs').readFileSync(_carPath, 'utf8'));
-        const reacted = carCfg.reactedMsgIds || [];
-        if (reacted.includes(msgId)) {
-          return { ok: false, skipped: true, reason: 'already reacted to this post', msgId };
-        }
-      } catch {}
+      // (per-session skip check handled in caller)
 
       // Resolve real newsletter JID once
       let realJid = null;
@@ -986,17 +968,41 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
       }
 
       if (!target) {
-        // Check if it was a skip (already reacted)
-        const wasSkipped = failReason && failReason.includes('already reacted');
-        if (!wasSkipped) failCount++;
-        sessionResults.push({ num, ok: false, skipped: wasSkipped, reason: failReason });
-        io.emit('react_progress', { num, ok: false, skipped: wasSkipped, reason: failReason, emoji: savedEmoji, emojis: savedEmojis });
+        failCount++;
+        sessionResults.push({ num, ok: false, reason: failReason });
+        io.emit('react_progress', { num, ok: false, reason: failReason, emoji: savedEmoji, emojis: savedEmojis });
         continue;
       }
 
-      // ── React with ALL emojis using same resolved target ──────
+      // ── Per-session skip check (not global) ───────────────
+      // Key: reactedBy_<num>  →  array of reacted msgIds for this session
+      const sessionReactKey = `reactedBy_${num}`;
+      let sessionAlreadyReacted = false;
+      try {
+        const carCfg = JSON.parse(require('fs').readFileSync(_carPath, 'utf8'));
+        const srList = carCfg[sessionReactKey] || [];
+        if (srList.includes(target.msgId)) {
+          sessionAlreadyReacted = true;
+        }
+      } catch {}
+
+      if (sessionAlreadyReacted) {
+        sessionResults.push({ num, ok: false, skipped: true, reason: 'already reacted to this post' });
+        io.emit('react_progress', { num, ok: false, skipped: true, reason: 'already reacted', emoji: savedEmoji, emojis: savedEmojis });
+        continue;
+      }
+
+      // ── WA allows only 1 reaction per user per post.
+      // ── Distribute emojis: each session gets ONE emoji from the list (round-robin)
+      const sessIdx = connected.indexOf(sessInfo);
+      const assignedEmoji = savedEmojis.length > 1
+        ? savedEmojis[sessIdx % savedEmojis.length]
+        : savedEmojis[0];
+      const reactEmojis = [assignedEmoji]; // send only assigned emoji for this session
+
+      // ── React with assigned emoji ──────────────────────────
       let emojiOkCount = 0;
-      for (const _em of savedEmojis) {
+      for (const _em of reactEmojis) {
         try {
           const result = await reactOneEmoji(s, target, _em);
           if (result.ok) {
@@ -1007,20 +1013,18 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
         } catch (e2) {
           failReason = (e2.message || 'unknown error').slice(0, 60);
         }
-        if (savedEmojis.length > 1) await new Promise(r => setTimeout(r, 400));
       }
       sessionOk = emojiOkCount > 0;
 
-      // ── Save reacted msgId to skip list ───────────────────
+      // ── Save per-session reacted msgId ────────────────────
       if (sessionOk && target?.msgId) {
         try {
           const carCfg = JSON.parse(require('fs').readFileSync(_carPath, 'utf8'));
-          const reacted = carCfg.reactedMsgIds || [];
-          if (!reacted.includes(target.msgId)) {
-            reacted.push(target.msgId);
-            // Keep only last 200 msgIds to avoid bloat
-            if (reacted.length > 200) reacted.splice(0, reacted.length - 200);
-            carCfg.reactedMsgIds = reacted;
+          const srList = carCfg[sessionReactKey] || [];
+          if (!srList.includes(target.msgId)) {
+            srList.push(target.msgId);
+            if (srList.length > 200) srList.splice(0, srList.length - 200);
+            carCfg[sessionReactKey] = srList;
             require('fs').writeFileSync(_carPath, JSON.stringify(carCfg, null, 2));
           }
         } catch {}
@@ -1030,12 +1034,12 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
       sessionResults.push({ num, ok: sessionOk, reason: failReason });
 
       // ── Push per-session result to dashboard instantly ────
-      io.emit('react_progress', { num, ok: sessionOk, reason: failReason, emoji: savedEmoji, emojis: savedEmojis });
+      io.emit('react_progress', { num, ok: sessionOk, reason: failReason, emoji: assignedEmoji, emojis: [assignedEmoji] });
 
       // ── Each session sends its OWN result via its OWN sock ────
       try {
         const icon = sessionOk ? '✅' : '❌';
-        const emojiLine = sessionOk ? `\n${savedEmojis.join(' ')} *Reacted*` : `\n❌ Reason: ${failReason}`;
+        const emojiLine = sessionOk ? `\n${assignedEmoji} *Reacted*` : `\n❌ Reason: ${failReason}`;
         const channelLine = target ? `\n📢 Post: ${target.msgId}` : '';
         await s.sendMessage(NOTIFY_JID, {
           text: `${icon} *+${num}*\n${sessionOk ? 'react success' : 'react fail'}${emojiLine}${channelLine}`
