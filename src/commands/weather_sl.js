@@ -2,29 +2,42 @@
 const axios  = require('axios');
 const cfg    = require('../../config');
 const { sendButtons } = require('./helper');
-const { getT } = require('../lang');
 
-// ── Weather condition → emoji ──────────────────────────────────
+const SL_CITY_ALIASES = {
+  'kotte':          'Sri Jayawardenepura Kotte',
+  'jayawardena':    'Sri Jayawardenepura Kotte',
+  'nuwara':         'Nuwara Eliya',
+  'nuwaraeliya':    'Nuwara Eliya',
+  'nuwara eliya':   'Nuwara Eliya',
+  'trinco':         'Trincomalee',
+  'dehiwala':       'Dehiwala-Mount Lavinia',
+  'mount lavinia':  'Dehiwala-Mount Lavinia',
+  'jaela':          'Ja-Ela',
+  'ja ela':         'Ja-Ela',
+  'anuradapura':    'Anuradhapura',
+  'polonnaruva':    'Polonnaruwa',
+};
+
+function resolveCity(input) {
+  return SL_CITY_ALIASES[input.toLowerCase().trim()] || input.trim();
+}
+
 function weatherEmoji(desc = '') {
   const d = desc.toLowerCase();
-  if (d.includes('thunder') || d.includes('storm'))          return '⛈️';
-  if (d.includes('blizzard') || d.includes('blowing snow'))  return '🌨️';
-  if (d.includes('snow') || d.includes('sleet'))             return '❄️';
-  if (d.includes('ice') || d.includes('freezing'))           return '🧊';
-  if (d.includes('heavy rain') || d.includes('torrential'))  return '🌧️';
-  if (d.includes('rain') || d.includes('shower'))            return '🌦️';
-  if (d.includes('drizzle'))                                 return '🌂';
-  if (d.includes('fog') || d.includes('mist'))               return '🌫️';
-  if (d.includes('haze') || d.includes('smoke'))             return '😶‍🌫️';
-  if (d.includes('overcast'))                                return '☁️';
-  if (d.includes('partly cloudy') || d.includes('partial'))  return '⛅';
-  if (d.includes('cloudy'))                                  return '🌥️';
-  if (d.includes('sunny') || d.includes('clear'))            return '☀️';
-  if (d.includes('wind'))                                    return '🌬️';
+  if (d.includes('thunder') || d.includes('storm'))         return '⛈️';
+  if (d.includes('snow') || d.includes('sleet'))            return '❄️';
+  if (d.includes('heavy rain') || d.includes('torrential')) return '🌧️';
+  if (d.includes('rain') || d.includes('shower'))           return '🌦️';
+  if (d.includes('drizzle'))                                return '🌂';
+  if (d.includes('fog') || d.includes('mist'))              return '🌫️';
+  if (d.includes('haze') || d.includes('smoke'))            return '😶‍🌫️';
+  if (d.includes('overcast'))                               return '☁️';
+  if (d.includes('partly cloudy') || d.includes('partial')) return '⛅';
+  if (d.includes('cloudy'))                                 return '🌥️';
+  if (d.includes('sunny') || d.includes('clear'))           return '☀️';
   return '🌤️';
 }
 
-// ── UV index label ────────────────────────────────────────────
 function uvLabel(uv) {
   const n = parseInt(uv, 10);
   if (n <= 2)  return `${uv} 🟢 Low`;
@@ -34,108 +47,94 @@ function uvLabel(uv) {
   return `${uv} 🟣 Extreme`;
 }
 
-// ── Wind direction → compass arrow ───────────────────────────
 function windArrow(dir = '') {
-  const map = {
-    N:'↑', NNE:'↑↗', NE:'↗', ENE:'↗',
-    E:'→', ESE:'↘', SE:'↘', SSE:'↓↘',
-    S:'↓', SSW:'↓↙', SW:'↙', WSW:'↙',
-    W:'←', WNW:'↖', NW:'↖', NNW:'↑↖',
-  };
+  const map = { N:'↑',NNE:'↑↗',NE:'↗',ENE:'↗',E:'→',ESE:'↘',SE:'↘',SSE:'↓↘',S:'↓',SSW:'↓↙',SW:'↙',WSW:'↙',W:'←',WNW:'↖',NW:'↖',NNW:'↑↖' };
   return map[dir] || dir;
 }
 
-// ── Date: "2025-04-27" → "Sun 27 Apr" ─────────────────────────
 function fmtDate(dateStr) {
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-LK', { weekday: 'short', day: '2-digit', month: 'short' });
-  } catch { return dateStr; }
+  try { return new Date(dateStr).toLocaleDateString('en-LK', { weekday:'short', day:'2-digit', month:'short' }); }
+  catch { return dateStr; }
 }
 
-// ── Rain chance label ─────────────────────────────────────────
-function rainBar(pct) {
-  const n = parseInt(pct, 10);
-  const filled = Math.round(n / 20);
-  return '🟦'.repeat(filled) + '⬜'.repeat(5 - filled) + ` ${n}%`;
-}
-
-// ─────────────────────────────────────────────────────────────
 module.exports = {
   commands: ['weather', 'wthr', 'wt', 'forecast'],
 
   async run({ sock, m }) {
-    const city = (m.text || '').trim() || 'Colombo';
+    const rawCity = (m.text || '').trim();
+
+    // ── No city → ask for it ──────────────────────────────
+    if (!rawCity) {
+      return sendButtons(sock, m.chat, {
+        text:
+          `🌦️ *WEATHER*\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `🏙️ Type city name:\n` +
+          `  *.weather Colombo*\n` +
+          `  *.weather Kandy*\n` +
+          `  *.weather Galle*\n\n` +
+          `Or tap a city below:\n\n` +
+          `${cfg.footer}`,
+        footer: cfg.footer,
+        buttons: [
+          { label: '🏙️ Colombo',      id: '.weather Colombo'      },
+          { label: '🏔️ Kandy',        id: '.weather Kandy'        },
+          { label: '🌊 Galle',        id: '.weather Galle'        },
+          { label: '❄️ Nuwara Eliya', id: '.weather Nuwara Eliya' },
+        ],
+      });
+    }
+
+    const city = resolveCity(rawCity);
     await m.reply(`🔍 Fetching weather for *${city}*...`);
 
     try {
       const res = await axios.get(
         `https://wttr.in/${encodeURIComponent(city)}?format=j1`,
-        { timeout: 12000, headers: { 'User-Agent': 'curl/7.68.0' } }
+        { timeout: 15000, headers: { 'User-Agent': 'curl/7.68.0', Accept: 'application/json' } }
       );
-      const data = res.data;
 
-      // ── Current conditions ──────────────────────────────────
+      const data = res.data;
+      if (!data?.current_condition?.[0]) throw new Error('No data returned');
+
       const cur     = data.current_condition[0];
       const area    = data.nearest_area[0];
       const cityOut = area.areaName[0]?.value || city;
       const country = area.country[0]?.value || '';
       const flag    = country.toLowerCase().includes('sri lanka') ? '🇱🇰' : '🌍';
+      const desc    = cur.weatherDesc[0]?.value || '';
+      const emo     = weatherEmoji(desc);
 
-      const tempC    = cur.temp_C;
-      const feelsC   = cur.FeelsLikeC;
-      const humidity = cur.humidity;
-      const windKmph = cur.windspeedKmph;
-      const windDir  = cur.winddir16Point;
-      const pressure = cur.pressure;
-      const vis      = cur.visibility;
-      const uv       = cur.uvIndex;
-      const cloud    = cur.cloudcover;
-      const desc     = cur.weatherDesc[0]?.value || '';
-      const emo      = weatherEmoji(desc);
+      const tempFilled = Math.round(Math.max(0, Math.min(100, ((parseInt(cur.temp_C, 10) - 10) / 30) * 100)) / 10);
+      const tempBar    = '🟥'.repeat(tempFilled) + '⬜'.repeat(10 - tempFilled);
 
-      // ── Temp bar (10°=min, 40°=max for SL) ───────────────────
-      const tempPct   = Math.max(0, Math.min(100, ((parseInt(tempC, 10) - 10) / 30) * 100));
-      const tempFilled = Math.round(tempPct / 10);
-      const tempBar   = '🟥'.repeat(tempFilled) + '⬜'.repeat(10 - tempFilled);
-
-      // ── 3-day forecast ────────────────────────────────────────
-      const forecastLines = data.weather.slice(0, 3).map(day => {
-        const fe    = weatherEmoji(day.hourly[4]?.weatherDesc[0]?.value || '');
-        const rain  = day.hourly[4]?.chanceofrain || '0';
-        const maxC  = day.maxtempC;
-        const minC  = day.mintempC;
-        const label = fmtDate(day.date);
-        return (
-          `│  ${fe} *${label}*\n` +
-          `│      🌡️ ${minC}° – ${maxC}°C   🌧️ ${rain}%`
-        );
+      const forecastLines = (data.weather || []).slice(0, 3).map(day => {
+        const fe   = weatherEmoji(day.hourly?.[4]?.weatherDesc?.[0]?.value || '');
+        const rain = day.hourly?.[4]?.chanceofrain || '0';
+        return `│  ${fe} *${fmtDate(day.date)}*\n│      🌡️ ${day.mintempC}° – ${day.maxtempC}°C   🌧️ ${rain}%`;
       }).join('\n│\n');
 
-      // ── Build message ─────────────────────────────────────────
       const msg =
         `╔══════════════════════════════╗\n` +
-        `║   ${emo} *WEATHER REPORT* ${emo}         ║\n` +
+        `║  ${emo} *WEATHER REPORT* ${emo}\n` +
         `║  ${flag} *${cityOut}*, ${country}\n` +
         `╠══════════════════════════════╣\n` +
         `║\n` +
-        `║   ${emo} *${desc}*\n` +
-        `║   🌡️ *${tempC}°C*  _(feels like ${feelsC}°C)_\n` +
+        `║  ${emo} *${desc}*\n` +
+        `║  🌡️ *${cur.temp_C}°C*  _(feels like ${cur.FeelsLikeC}°C)_\n` +
         `║\n` +
-        `║   ${tempBar}\n` +
-        `║   10°C ───────────────── 40°C\n` +
+        `║  ${tempBar}\n` +
+        `║  10°C ─────────────────── 40°C\n` +
         `║\n` +
         `╠══════════════════════════════╣\n` +
-        `│\n` +
-        `│  💧 *Humidity*   : ${humidity}%\n` +
-        `│  💨 *Wind*       : ${windKmph} km/h  ${windArrow(windDir)} ${windDir}\n` +
-        `│  🔵 *Pressure*   : ${pressure} hPa\n` +
-        `│  👁️ *Visibility* : ${vis} km\n` +
-        `│  ☀️ *UV Index*   : ${uvLabel(uv)}\n` +
-        `│  ☁️ *Cloud*      : ${cloud}%\n` +
-        `│\n` +
+        `│  💧 Humidity   : ${cur.humidity}%\n` +
+        `│  💨 Wind       : ${cur.windspeedKmph} km/h ${windArrow(cur.winddir16Point)} ${cur.winddir16Point}\n` +
+        `│  🔵 Pressure   : ${cur.pressure} hPa\n` +
+        `│  👁️ Visibility : ${cur.visibility} km\n` +
+        `│  ☀️ UV Index   : ${uvLabel(cur.uvIndex)}\n` +
+        `│  ☁️ Cloud      : ${cur.cloudcover}%\n` +
         `╠══════════════════════════════╣\n` +
-        `║   📅 *3-DAY FORECAST*\n` +
+        `║  📅 *3-DAY FORECAST*\n` +
         `╠══════════════════════════════╣\n` +
         `│\n` +
         `${forecastLines}\n` +
@@ -147,24 +146,25 @@ module.exports = {
         text: msg,
         footer: cfg.footer,
         buttons: [
-          { label: `🔄 Refresh`,       id: `.weather ${city}` },
-          { label: `🏙️ Colombo`,       id: `.weather Colombo` },
-          { label: `📋 SL Menu`,       id: `.menu_srilanka`   },
+          { label: `🔄 Refresh`,    id: `.weather ${rawCity}` },
+          { label: `🏙️ Other city`, id: `.weather`            },
         ],
       });
 
     } catch (e) {
-      const isNotFound = e?.response?.status === 404 || (e.message || '').includes('404');
-      const errMsg = isNotFound
-        ? `❌ City *"${city}"* not found.\n\n💡 Try: *.weather Colombo*\n\n${cfg.footer}`
-        : `❌ Failed to fetch weather.\n\n_${e.message}_\n\n${cfg.footer}`;
+      const is404 = e?.response?.status === 404
+        || String(e?.response?.data || '').includes('Unknown location')
+        || String(e?.response?.data || '').includes('not found');
+
       await sendButtons(sock, m.chat, {
-        text: errMsg,
+        text: is404
+          ? `❌ *"${city}"* not found.\n\n💡 Try a nearby larger city.\n\n${cfg.footer}`
+          : `❌ Failed to get weather.\n\n_${e.message}_\n\n${cfg.footer}`,
         footer: cfg.footer,
         buttons: [
-          { label: '🏙️ Try Colombo',  id: '.weather Colombo'  },
-          { label: '🏙️ Try Kandy',    id: '.weather Kandy'    },
-          { label: '🏙️ Try Galle',    id: '.weather Galle'    },
+          { label: '🏙️ Colombo',      id: '.weather Colombo'  },
+          { label: '🏔️ Kandy',        id: '.weather Kandy'    },
+          { label: '🌊 Galle',        id: '.weather Galle'    },
         ],
       });
     }
