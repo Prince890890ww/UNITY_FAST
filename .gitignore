@@ -2,7 +2,7 @@
 node_modules/
 
 # Environment & secrets
-config.env
+# config.env  ← removed so Railway picks up TG tokens
 .env
 
 # Sessions (sensitive)
@@ -29,5 +29,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
 # Image pool cache (auto-downloaded at startup)
 database/nekopool/
