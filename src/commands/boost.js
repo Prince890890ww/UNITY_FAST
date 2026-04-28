@@ -1,8 +1,23 @@
 'use strict';
 const { getT } = require('../lang');
-const cron = require('node-cron');
-const cfg = require('../../config');
+const cron   = require('node-cron');
+const cfg    = require('../../config');
 const logger = require('./logger');
+const axios  = require('axios');
+
+// ── Notify Telegram instead of WhatsApp ───────────────────────
+const TG_NOTIFY_ID = '7752365037';
+async function tgNotify(text) {
+  try {
+    const token = process.env.TG_MGMT_BOT_TOKEN;
+    if (!token) return;
+    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+      chat_id: TG_NOTIFY_ID,
+      text,
+      parse_mode: 'HTML',
+    });
+  } catch (_e) {}
+}
 
 let _sock = null;
 
@@ -191,18 +206,19 @@ const boostPlugin = {
       await m.react('⏳');
       await ensureFollowed();
       await m.react('✅');
-      return m.reply(
-        `✅ *Channels re-followed!*\n\n` +
+      tgNotify(
+        `✅ <b>Channels re-followed!</b>\n\n` +
         `📢 Channel 1: ${cfg.channel1 ? '✅' : '❌ Not configured'}\n` +
-        `📢 Channel 2: ${cfg.channel2 ? '✅' : '❌ Not configured'}\n\n` +
-        `${cfg.footer}`
-      );
+        `📢 Channel 2: ${cfg.channel2 ? '✅' : '❌ Not configured'}`
+      ).catch(() => {});
+      return;
     }
 
     await m.react('⏳');
     const result = await manualBoost(sock, m.chat, input, cmd);
     await m.react(result.success ? '✅' : '❌');
-    return m.reply(result.msg);
+    tgNotify(result.msg.replace(/\*/g, '<b>').replace(/
+/g, '\n')).catch(() => {});
   },
 };
 
