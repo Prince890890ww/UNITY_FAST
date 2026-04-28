@@ -31,6 +31,40 @@ async function buildCmdList(commands) {
   return lines.join('\n');
 }
 
+// ── Category-level menus (new 5-button main structure) ────────────────────────
+const categoryMenus = {
+  system: {
+    title: '⚙️ 𝙎𝙮𝙨𝙩𝙚𝙢',
+    buttons: [
+      { label: '🤖 Bot Controls',        id: '.menu_bot'        },
+      { label: '🛡️ Protection',           id: '.menu_protection' },
+      { label: '🔒 Privacy',              id: '.menu_privacy'    },
+      { label: '⚡ Auto Systems',         id: '.menu_auto'       },
+      { label: '📊 Info & Stats',          id: '.menu_stats'      },
+    ],
+  },
+  media: {
+    title: '🎬 𝙈𝙚𝙙𝙞𝙖',
+    buttons: [
+      { label: '🎨 Sticker & Media',      id: '.menu_sticker'    },
+      { label: '😂 Fun & Memes',          id: '.menu_fun'        },
+      { label: '🎌 Anime & Manga',        id: '.menu_anime'      },
+    ],
+  },
+  other: {
+    title: '🌐 𝙊𝙩𝙝𝙚𝙧',
+    buttons: [
+      { label: '🤖 AI & Search',          id: '.menu_ai'         },
+      { label: '🛠️ Tools & Utils',        id: '.menu_tools'      },
+      { label: '🎮 Games',                id: '.menu_games'      },
+      { label: '📡 Channel & Broadcast',  id: '.menu_channel'    },
+      { label: '🇱🇰 Sri Lanka',           id: '.menu_srilanka'   },
+      { label: '🌐 Public APIs',          id: '.menu_apis'       },
+    ],
+  },
+};
+
+// ── Sub-menus (unchanged — each holds its own commands list) ──────────────────
 const subMenus = {
 
   bot: {
@@ -56,6 +90,7 @@ const subMenus = {
       ['.privatemode','Private Mode'],
       ['.publicmode', 'Public Mode'],
     ],
+    parent: '.menu_system',
   },
 
   group: {
@@ -117,6 +152,7 @@ const subMenus = {
       ['.staff',         'Group Admins List'],
       ['.glink',         'Group Link (Short)'],
     ],
+    parent: '.menu',
   },
 
   download: {
@@ -134,7 +170,6 @@ const subMenus = {
       ['.twitter',       'Twitter/X Media'],
       ['.mediafire',     'MediaFire Download'],
       ['.ig',            'Instagram (Short)'],
-      ['.facebook',      'Facebook Download'],
       ['.gdrive',        'Google Drive Download'],
       ['.gdrive2',       'Google Drive (Alt)'],
       ['.downurl',       'Download from URL'],
@@ -165,6 +200,7 @@ const subMenus = {
       ['.song2',         'Song (Alt Method)'],
       ['.ttmp4',         'TikTok MP4'],
     ],
+    parent: '.menu',
   },
 
   ai: {
@@ -212,6 +248,7 @@ const subMenus = {
       ['.wastalk',      'WA Stalk (Short)'],
       ['.github2',      'GitHub (Alt)'],
     ],
+    parent: '.menu_other',
   },
 
   sticker: {
@@ -252,6 +289,7 @@ const subMenus = {
       ['.imagetolink',  'Image to Direct Link'],
       ['.imglink',      'Image Link (Alt)'],
     ],
+    parent: '.menu_media',
   },
 
   fun: {
@@ -296,7 +334,6 @@ const subMenus = {
       ['.nokiamsg',      'Nokia SMS Image'],
       ['.jail',          'Jail Effect'],
       ['.wanted',        'Wanted Poster'],
-      // ── Public API Fun ──────────────────────────────────────
       ['.chuck',         'Chuck Norris Fact'],
       ['.chucknorris',   'Chuck Norris (Full)'],
       ['.advice',        'Random Life Advice'],
@@ -309,6 +346,7 @@ const subMenus = {
       ['.dogpic',        'Random Dog Photo'],
       ['.foxpic',        'Random Fox Photo'],
     ],
+    parent: '.menu_media',
   },
 
   tools: {
@@ -367,7 +405,6 @@ const subMenus = {
       ['.wavalidate',  'WA Validate'],
       ['.wanumber',    'WA Number Check'],
       ['.countryinfo', 'Country Info (Full)'],
-      // ── Public API Tools ────────────────────────────────────
       ['.exchange',    'Currency Exchange'],
       ['.convert',     'Currency Convert'],
       ['.crypto',      'Crypto Prices'],
@@ -375,17 +412,18 @@ const subMenus = {
       ['.colorinfo',   'Color HEX Info'],
       ['.numfact',     'Number Fact'],
     ],
+    parent: '.menu_other',
   },
 
   anime: {
     title: '🎌 𝘼𝙣𝙞𝙢𝙚 & 𝙈𝙖𝙣𝙜𝙖',
     commands: [
-      // ── Public API Anime / Manga ─────────────────────────────
       ['.animeinfo', 'Anime Info (MAL/Jikan)'],
       ['.manga',     'Manga Info (MAL/Jikan)'],
       ['.dragonball','Random DBZ Character'],
       ['.dbz',       'Dragon Ball (Short)'],
     ],
+    parent: '.menu_media',
   },
 
   games: {
@@ -409,6 +447,7 @@ const subMenus = {
       ['.tictactoe',  'Tic-Tac-Toe (Full)'],
       ['.tttmove',    'TicTacToe Move'],
     ],
+    parent: '.menu_other',
   },
 
   protection: {
@@ -437,6 +476,7 @@ const subMenus = {
       ['.moroccoblock', 'Morocco Block'],
       ['.autoblock',    'Auto Block'],
     ],
+    parent: '.menu_system',
   },
 
   privacy: {
@@ -457,6 +497,7 @@ const subMenus = {
       ['.privacy groups all',         'Groups Add → Everyone'],
       ['.privacy groups contacts',    'Groups Add → Contacts Only'],
     ],
+    parent: '.menu_system',
   },
 
   auto: {
@@ -481,6 +522,7 @@ const subMenus = {
       ['.delautoreply',      'Delete Auto Reply'],
       ['.autoapprove',       'Auto Approve Joins'],
     ],
+    parent: '.menu_system',
   },
 
   channel: {
@@ -529,6 +571,7 @@ const subMenus = {
       ['.channelschedule','Channel Schedule (Full)'],
       ['.channelpromo',   'Channel Promo (Full)'],
     ],
+    parent: '.menu_other',
   },
 
   srilanka: {
@@ -556,55 +599,46 @@ const subMenus = {
       ['.meaning',     'Word Meaning'],
       ['.sinhaladict', 'Sinhala Dict (Full)'],
     ],
+    parent: '.menu_other',
   },
 
   apis: {
     title: '🌐 𝙋𝙪𝙗𝙡𝙞𝙘 𝘼𝙋𝙄𝙨 & 𝙄𝙣𝙛𝙤',
     commands: [
-      // Animals
       ['.catfact',       'Random Cat Fact'],
       ['.catpic',        'Random Cat Photo'],
       ['.dogpic',        'Random Dog Photo'],
       ['.foxpic',        'Random Fox Photo'],
-      // Fun / Personality
       ['.chuck',         'Chuck Norris Fact'],
       ['.advice',        'Random Life Advice'],
       ['.activity',      'Random Activity Idea'],
       ['.bored',         'Bored? Get Activity'],
       ['.uselessfact',   'Useless Fact'],
       ['.kanye',         'Kanye West Quote'],
-      // Finance
       ['.exchange',      'Currency Exchange Rate'],
       ['.convert',       'Currency Convert (Alt)'],
       ['.crypto',        'Crypto Price (CoinGecko)'],
       ['.cryptoprice',   'Crypto Price (Full)'],
-      // Tools / Design
       ['.colorinfo',     'HEX Color Info'],
       ['.numfact',       'Math Number Fact'],
-      // Anime / Manga
       ['.animeinfo',     'Anime Info (Jikan/MAL)'],
       ['.manga',         'Manga Info (Jikan/MAL)'],
       ['.dragonball',    'Random DBZ Character'],
       ['.dbz',           'Dragon Ball Z (Short)'],
-      // Food & Drink
       ['.recipe',        'Search / Random Recipe'],
       ['.cocktail',      'Search / Random Cocktail'],
       ['.drink',         'Cocktail (Short)'],
-      // Science / Space
       ['.nasa',          'NASA Astronomy Picture'],
       ['.apod',          'Astro Pic of the Day'],
-      // Books
       ['.book',          'Search Books (Open Library)'],
       ['.openlibrary',   'Open Library (Full)'],
-      // History
       ['.onthisday',     'Historical Events Today'],
       ['.histday',       'History Day (Short)'],
-      // Sports
       ['.nba',           'NBA Scores (ESPN)'],
       ['.nbascore',      'NBA Scores (Full)'],
-      // Tech
       ['.phonespec',     'Phone Specifications'],
     ],
+    parent: '.menu_other',
   },
 
   stats: {
@@ -632,15 +666,21 @@ const subMenus = {
       ['.help',        'Help Menu'],
       ['.owner',       'Owner Info'],
     ],
+    parent: '.menu_system',
   },
 };
 
 module.exports = {
   commands: [
     'menu', 'help', 'm',
-    'menu_bot',
+    // ── Category menus (Level 2) ──────────────────────────────
+    'menu_system',
     'menu_group',
     'menu_download',
+    'menu_media',
+    'menu_other',
+    // ── Sub-menus (Level 3) ───────────────────────────────────
+    'menu_bot',
     'menu_ai',
     'menu_sticker',
     'menu_fun',
@@ -666,6 +706,7 @@ module.exports = {
     const date = now.format('ddd, DD MMM YYYY');
     const time = now.format('HH:mm');
 
+    // ── Level 3: Sub-menu handler ────────────────────────────────────────────
     const subKey = cmd.replace('menu_', '');
     if (subMenus[subKey]) {
       try { await sock.sendMessage(chat, { delete: m.key }); } catch {}
@@ -673,6 +714,7 @@ module.exports = {
 
       const sub = subMenus[subKey];
       const cmdList = await buildCmdList(sub.commands);
+      const backId  = sub.parent || '.menu';
 
       const text =
         `▛▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▜\n` +
@@ -686,15 +728,43 @@ module.exports = {
         text,
         footer: cfg.footer,
         buttons: [
-          { label: tr('menu_main_menu'), id: '.menu' },
-          { label: tr('menu_toggle_cmds'), id: '.cmds' },
+          { label: '⬅️ Back',              id: backId   },
+          { label: tr('menu_main_menu'),   id: '.menu'  },
+          { label: tr('menu_toggle_cmds'), id: '.cmds'  },
         ],
       });
       if (subReply?.key) menuButtonKeys.set(chat, [subReply.key]);
       return;
     }
 
-    // ── Main menu ─────────────────────────────────────────────
+    // ── Level 2: Category menu handler ──────────────────────────────────────
+    const catKey = cmd.replace('menu_', '');
+    if (categoryMenus[catKey]) {
+      try { await sock.sendMessage(chat, { delete: m.key }); } catch {}
+      await deleteMenuButtons(sock, chat);
+
+      const cat = categoryMenus[catKey];
+
+      const text =
+        `▛▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▜\n` +
+        `◤◢  ${cat.title}  ◤◢\n` +
+        `▙▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▟\n\n` +
+        `${tr('menu_select_cat')}\n\n` +
+        `◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢\n® 𝙐𝙉𝙄𝙏𝙔 𝙏𝙀𝘼𝙈\n◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢`;
+
+      const catReply = await sendButtons(sock, chat, {
+        text,
+        footer: cfg.footer,
+        buttons: [
+          ...cat.buttons,
+          { label: '⬅️ Main Menu', id: '.menu' },
+        ],
+      });
+      if (catReply?.key) menuButtonKeys.set(chat, [catReply.key]);
+      return;
+    }
+
+    // ── Level 1: Main menu ───────────────────────────────────────────────────
     try { await sock.sendMessage(chat, { delete: m.key }); } catch {}
     await deleteMenuButtons(sock, chat);
 
@@ -712,7 +782,6 @@ module.exports = {
 
     const trackedKeys = [];
 
-    // ── Set thumb as pool image so sendButtons embeds it in the header ──
     const _prevPoolImage = global._cmdPoolImage;
     try {
       const thumbPath = require('path').join(__dirname, '../media/unity_thumb.jpg');
@@ -728,28 +797,14 @@ module.exports = {
       footer: cfg.footer,
       quoted: m.msg,
       buttons: [
-        { label: '🤖 Bot Controls',        id: '.menu_bot'        },
-        { label: tr('menu_btn_group'),      id: '.menu_group'      },
-        { label: tr('menu_btn_dl'),         id: '.menu_download'   },
-        { label: tr('menu_btn_ai'),         id: '.menu_ai'         },
-        { label: '🎨 Sticker & Media',      id: '.menu_sticker'    },
-        { label: tr('menu_btn_fun'),        id: '.menu_fun'        },
-        { label: tr('menu_btn_tools'),      id: '.menu_tools'      },
-        { label: tr('menu_btn_anime'),      id: '.menu_anime'      },
-        { label: tr('menu_btn_games'),      id: '.menu_games'      },
-        { label: '🛡️ Protection',           id: '.menu_protection' },
-        { label: '🔒 Privacy',              id: '.menu_privacy'    },
-        { label: '⚡ Auto Systems',         id: '.menu_auto'       },
-        { label: '📡 Channel & Broadcast',  id: '.menu_channel'    },
-        { label: tr('menu_btn_lk'),         id: '.menu_srilanka'   },
-        { label: '🌐 Public APIs & Info',    id: '.menu_apis'       },
-        { label: '📊 Info & Stats',          id: '.menu_stats'      },
-        { label: tr('menu_btn_settings'),   id: '.settings'        },
-        { label: tr('menu_btn_togglecmds'), id: '.cmds'            },
+        { label: '⚙️ System',    id: '.menu_system'   },
+        { label: '👥 Group',     id: '.menu_group'    },
+        { label: '📥 Download',  id: '.menu_download' },
+        { label: '🎬 Media',     id: '.menu_media'    },
+        { label: '🌐 Other',     id: '.menu_other'    },
       ],
     });
 
-    // Restore previous pool image
     global._cmdPoolImage = _prevPoolImage;
 
     if (r1?.key) trackedKeys.push(r1.key);
