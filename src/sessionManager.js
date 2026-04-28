@@ -850,6 +850,29 @@ async function restoreActiveSessions(onUpdate) {
   return restored;
 }
 
+// ── Register the main bot sock into the session map ─────────
+// Called from start.js after the owner number connects.
+function registerMainSession(userId, sock) {
+  if (!userId || !sock) return;
+  const existing = sessions.get(userId);
+  if (existing) {
+    existing.sock   = sock;
+    existing.status = STATUS.CONNECTED;
+    existing.connectedAt = Date.now();
+  } else {
+    sessions.set(userId, {
+      userId,
+      sock,
+      status:      STATUS.CONNECTED,
+      pairCode:    null,
+      connectedAt: Date.now(),
+      retries:     0,
+      msgStore:    new Map(),
+      retryCache:  new (require('node-cache'))(),
+    });
+  }
+}
+
 module.exports = {
   startSession,
   stopSession,
@@ -857,6 +880,7 @@ module.exports = {
   getSession,
   getAllSessions,
   restoreActiveSessions,
+  registerMainSession,
   STATUS,
   UserAuthState,
 };
