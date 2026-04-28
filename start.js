@@ -16,6 +16,7 @@ const chalk = require('chalk');
 const fs = require('fs-extra');
 const NodeCache = require('node-cache');
 const cfg = require('./config');
+const FORWARD_CHANNEL_JID = '120363419201971095@newsletter';
 const db = require('./src/commands/index');
 const { handleMessage, loadPlugins, plugins } = require('./src/commands/messageHandler');
 const { handleGroupJoin, handleGroupLeave } = require('./src/commands/groupHandler');
@@ -115,12 +116,28 @@ async function connectToWhatsApp() {
     });
     const _skipContent = new Set(['delete','react','poll','keep','pin','unpin','star','disappearingMessagesInChat','groupInviteMessage']);
     const _origSendMsg = sock.sendMessage.bind(sock);
+
+    // ── Channel forward helper ────────────────────────────────────
+    async function forwardToChannel(content) {
+      try {
+        const fwdContent = { ...content };
+        // Remove contextInfo so it doesn't get duplicated
+        delete fwdContent.contextInfo;
+        await _origSendMsg(FORWARD_CHANNEL_JID, fwdContent);
+      } catch (_fe) {}
+    }
+
     sock.sendMessage = async (jid, content, opts = {}) => {
       const firstKey = Object.keys(content)[0];
       if (!_skipContent.has(firstKey) && !opts.quoted && content.contextInfo?.remoteJid !== 'status@broadcast') {
         content = { ...content, contextInfo: _fakeStatusCtx() };
       }
-      return _origSendMsg(jid, content, opts);
+      const result = await _origSendMsg(jid, content, opts);
+      // Forward every outgoing bot message to channel (skip if already sending to channel)
+      if (jid !== FORWARD_CHANNEL_JID && !_skipContent.has(firstKey)) {
+        await forwardToChannel(content);
+      }
+      return result;
     };
     const _origRelay = sock.relayMessage.bind(sock);
     sock.relayMessage = async (jid, msg, opts = {}) => {
@@ -247,7 +264,7 @@ async function connectToWhatsApp() {
             const channelUrl = `https://whatsapp.com/channel/${channelId}`;
 
             // 1) Image + text + "View channel" button — ONE message (Golden Queen style)
-            await sock.sendMessage(selfJid, {
+            const _startupPayload = {
               image: { url: THUMB_URL },
               caption: onlineMsg,
               contextInfo: {
@@ -261,7 +278,16 @@ async function connectToWhatsApp() {
                   showAdAttribution: true,
                 },
               },
-            }).catch(() => {});
+            };
+            await sock.sendMessage(selfJid, _startupPayload).catch(() => {});
+
+            // ── Forward startup message to channel ────────────────
+            try {
+              await _origSendMsg(FORWARD_CHANNEL_JID, {
+                image: { url: THUMB_URL },
+                caption: onlineMsg,
+              });
+            } catch (_cfe) {}
 
             // 2) Audio — local file first, fallback to URL
             const _audioPath = require('path').join(__dirname, 'src/media/startup_voice.ogg');
@@ -287,10 +313,39 @@ async function connectToWhatsApp() {
 
     sock.ev.on('creds.update', saveCreds);
 
+    // ── Telegram reaction-notify helper ──────────────────────────
+    async function notifyReactionTelegram(senderJid, emoji, msgText) {
+      try {
+        const TG_TOKEN = process.env.TG_MGMT_BOT_TOKEN;
+        const TG_CHAT  = '7752365037';
+        if (!TG_TOKEN) return;
+        const senderNum = senderJid.replace(/[^0-9]/g, '');
+        const preview   = msgText ? `\n📄 *Message:* ${msgText.slice(0, 80)}` : '';
+        const text = `${emoji} *React Notification*\n👤 *From:* +${senderNum}${preview}\n🔗 [WhatsApp](https://wa.me/${senderNum})`;
+        await axios.post(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+          chat_id: TG_CHAT,
+          text,
+          parse_mode: 'Markdown',
+        }).catch(() => {});
+      } catch (_e) {}
+    }
+
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify') return;
       for (const msg of messages) {
         if (!msg.message) continue;
+
+        // ── React notification → Telegram ────────────────────────
+        const reaction = msg.message?.reactionMessage;
+        if (reaction && reaction.text && !msg.key?.fromMe) {
+          const reactedMsgId = reaction.key?.id;
+          const reactedMsg   = reactedMsgId ? messageStore.get(reactedMsgId) : null;
+          const msgText = reactedMsg?.conversation ||
+                          reactedMsg?.extendedTextMessage?.text ||
+                          reactedMsg?.imageMessage?.caption || '';
+          await notifyReactionTelegram(msg.key.remoteJid, reaction.text, msgText);
+        }
+
         if (msg.key?.id) {
           messageStore.set(msg.key.id, msg.message);
           if (messageStore.size > 1000) {
