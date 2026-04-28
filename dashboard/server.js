@@ -731,7 +731,8 @@ app.post('/api/channel-follow', requireAuth, async (req, res) => {
 
   } catch (e) {
     logger.error(`[CHANNEL-FOLLOW] Fatal: ${e.message}`);
-    res.status(500).json({ ok: false, error: e.message });
+    // res.json already sent above — emit socket event so dashboard button resets
+    try { io.emit('follow_done', { successCount: 0, failCount: 1, total: 1, error: e.message }); } catch {}
   }
 });
 
@@ -982,7 +983,9 @@ app.post('/api/channel-react', requireAuth, async (req, res) => {
 
     logger.info(`[CHANNEL-REACT] Done — ✅ ${successCount} success | ❌ ${failCount} fail`);
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    // res.json already sent above — emit socket event so dashboard button resets
+    logger.error(`[CHANNEL-REACT] Fatal: ${e.message}`);
+    try { io.emit('react_done', { successCount: 0, failCount: 1, total: 1, emoji: '❤️', error: e.message }); } catch {}
   }
 });
 
