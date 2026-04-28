@@ -6,180 +6,54 @@ const cfg   = require('../../config');
 const { getT } = require('../lang');
 
 const MENU_DIR      = path.join(__dirname, '../../database/menucards');
-const FETCH_TIMEOUT = 30000;
 
 // Ensure menucards directory exists
 if (!fs.existsSync(MENU_DIR)) fs.mkdirSync(MENU_DIR, { recursive: true });
 
-// nekos.best image category mapped to each menu section (1-15)
-// Available image categories on nekos.best: neko, waifu, kitsune, husbando
-// Rotated across sections so each menu card gets a different style
-const NEKO_CATEGORY_MAP = {
-  1:  'neko',       // Bot Controls
-  2:  'waifu',      // Group Management
-  3:  'kitsune',    // Downloads
-  4:  'neko',       // AI
-  5:  'waifu',      // Sticker / Media
-  6:  'kitsune',    // Fun
-  7:  'neko',       // Tools
-  8:  'waifu',      // Anime
-  9:  'kitsune',    // Games
-  10: 'neko',       // Protection
-  11: 'waifu',      // Auto Systems
-  12: 'kitsune',    // Channel
-  13: 'neko',       // Sri Lanka
-  14: 'waifu',      // Stats
-  15: 'kitsune',    // Public APIs & Info
-};
+// ── Local media images (shuffle these instead of downloading) ──────────────
+const MEDIA_DIR = path.join(__dirname, '../media');
+const LOCAL_MENU_IMAGES = [
+  path.join(MEDIA_DIR, 'unity_banner_1.jpg'),
+  path.join(MEDIA_DIR, 'unity_banner_2.jpg'),
+  path.join(MEDIA_DIR, 'unity_thumb.jpg'),
+].filter(p => fs.existsSync(p));
 
-// Per-category pools so we don't mix URLs
-const nekoPools = {};
-
-/** Fetch image URLs using the same APIs that work for .neko/.waifu commands */
-async function fetchImageFromWorkingAPIs(category) {
-  // Try multiple APIs in order — same ones used by the .neko/.waifu commands
-  const axios = require('axios');
-
-  // 1. waifu.pics — returns JPEG images, no auth needed
-  try {
-    const type = category === 'waifu' ? 'waifu' : 'neko';
-    const r = await axios.get(`https://api.waifu.pics/sfw/${type}`, { timeout: 15000 });
-    const url = r.data?.url;
-    if (url) return url;
-  } catch {}
-
-  // 2. nekos.life — image endpoint
-  try {
-    const type = category === 'waifu' ? 'waifu' : 'neko';
-    const r = await axios.get(`https://nekos.life/api/v2/img/${type}`, { timeout: 15000 });
-    const url = r.data?.url;
-    if (url) return url;
-  } catch {}
-
-  // 3. otakugifs.xyz
-  try {
-    const r = await axios.get(`https://api.otakugifs.xyz/gif?reaction=neko`, { timeout: 15000 });
-    const url = r.data?.url;
-    if (url) return url;
-  } catch {}
-
-  // 4. some-random-api
-  try {
-    const r = await axios.get(`https://some-random-api.com/animu/wink`, { timeout: 15000 });
-    const url = r.data?.link;
-    if (url) return url;
-  } catch {}
-
-  // 5. nekos.best (last resort — may 403 on some servers)
-  try {
-    const type = NEKO_CATEGORY_MAP[1] || 'neko';
-    const response = await axios.get(`https://nekos.best/api/v2/${type}`, { timeout: 15000 });
-    const url = response.data?.results?.[0]?.url;
-    if (url) return url;
-  } catch {}
-
-  throw new Error('All image APIs failed');
-}
-
-/** Get one image URL for a given section index */
-async function fetchNekoImage(sectionIndex) {
-  const category = NEKO_CATEGORY_MAP[sectionIndex] || 'neko';
-  // Use pool to avoid hammering APIs
-  if (!nekoPools[category] || nekoPools[category].length === 0) {
-    nekoPools[category] = [];
-    // Pre-fetch 5 URLs into pool
-    let filled = 0;
-    for (let i = 0; i < 5; i++) {
-      try {
-        const url = await fetchImageFromWorkingAPIs(category);
-        if (url) { nekoPools[category].push(url); filled++; }
-      } catch {}
-    }
-    if (filled === 0) throw new Error('Could not pre-fill image pool from any API');
+// Shuffle array helper (Fisher-Yates)
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
   }
-  return nekoPools[category].pop();
+  return a;
 }
 
-
-async function downloadImage(url, destPath, redirects = 0) {
-  if (redirects > 5) throw new Error('Too many redirects');
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Download timeout')), FETCH_TIMEOUT);
-    const lib = url.startsWith('https') ? require('https') : require('http');
-    lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; UNITY-MD/2.0)' } }, res => {
-      // Follow redirects
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        clearTimeout(timer);
-        res.resume();
-        return downloadImage(res.headers.location, destPath, redirects + 1).then(resolve).catch(reject);
-      }
-      if (res.statusCode !== 200) {
-        clearTimeout(timer);
-        res.resume();
-        return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
-      }
-      const chunks = [];
-      res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => {
-        clearTimeout(timer);
-        const buf = Buffer.concat(chunks);
-        // Validate: must be at least 10KB and start with JPEG/PNG magic bytes
-        const isJpeg = buf[0] === 0xFF && buf[1] === 0xD8;
-        const isPng  = buf[0] === 0x89 && buf[1] === 0x50;
-        if (buf.length < 10000) {
-          return reject(new Error(`File too small (${buf.length} bytes) — likely not a real image`));
-        }
-        if (!isJpeg && !isPng) {
-          return reject(new Error(`Not a valid image (magic bytes: ${buf[0].toString(16)} ${buf[1].toString(16)})`));
-        }
-        fs.writeFileSync(destPath, buf);
-        resolve(true);
-      });
-    }).on('error', e => { clearTimeout(timer); reject(e); });
-  });
+// Build a shuffled pool large enough for all 15 sections
+// e.g. 3 images × 5 = 15 slots, all shuffled
+let _imgPool = [];
+function getLocalImagePath(index) {
+  if (LOCAL_MENU_IMAGES.length === 0) return null;
+  if (_imgPool.length === 0) {
+    // Refill: repeat images until we have enough, then shuffle
+    const repeats = Math.ceil(15 / LOCAL_MENU_IMAGES.length);
+    const full = [];
+    for (let r = 0; r < repeats; r++) full.push(...LOCAL_MENU_IMAGES);
+    _imgPool = shuffleArray(full);
+  }
+  return _imgPool[index % _imgPool.length];
 }
 
-/** Validate that a file is a real JPEG (checks magic bytes and minimum size) */
-function isValidJpeg(filePath) {
-  try {
-    const fd = fs.openSync(filePath, 'r');
-    const buf = Buffer.alloc(4);
-    fs.readSync(fd, buf, 0, 4, 0);
-    fs.closeSync(fd);
-    const size = fs.statSync(filePath).size;
-    // JPEG magic: FF D8 FF, minimum real image ~10KB
-    return buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF && size > 10000;
-  } catch { return false; }
-}
-
-/** Refresh all 15 menu images using the same APIs as .neko/.waifu commands */
+/** refreshMenuImages is now a no-op — images come from local media folder */
 async function refreshMenuImages() {
   const results = [];
   for (let i = 1; i <= 15; i++) {
-    const file = `menu_${String(i).padStart(2, '0')}.jpg`;
-    const dest = path.join(MENU_DIR, file);
-    let success = false;
-    // Retry up to 6 times — nekos.best only, no other fallback
-    for (let attempt = 1; attempt <= 6 && !success; attempt++) {
-      try {
-        const url = await fetchNekoImage(i);
-        await downloadImage(url, dest);
-        if (!isValidJpeg(dest)) {
-          try { fs.unlinkSync(dest); } catch {}
-          throw new Error('Not a valid JPEG');
-        }
-        console.log(`[imenu] ✅ ${file} saved from nekos.best (attempt ${attempt})`);
-        success = true;
-      } catch (err) {
-        console.error(`[imenu] ❌ ${file} attempt ${attempt} failed:`, err.message);
-        if (attempt < 6) await new Promise(r => setTimeout(r, 2000 * attempt));
-      }
-    }
-    results.push({ section: i, success });
+    const imgPath = getLocalImagePath(i - 1);
+    results.push({ section: i, success: !!imgPath, file: imgPath ? path.basename(imgPath) : 'missing' });
   }
   return results;
 }
 
+// ── Section definitions
 
 // ── Section definitions (uses string keys for i18n) ──────────
 const SECTIONS = [
@@ -243,11 +117,13 @@ module.exports = {
         const results = await refreshMenuImages();
         const ok  = results.filter(r => r.success).length;
         const fail = results.length - ok;
+        const imgList = LOCAL_MENU_IMAGES.map(p => `✅ ${path.basename(p)}`).join('\n');
         await m.reply(
-          `✅ *Menu Images Refreshed*\n\n` +
-          `📸 Downloaded: ${ok}/15\n` +
-          (fail ? `❌ Failed: ${fail}\n` : '') +
-          `\nRun *.imenu* to see the updated menu.`
+          `✅ *Local Menu Images Ready*\n\n` +
+          `📂 Using ${LOCAL_MENU_IMAGES.length} local image(s):\n${imgList}\n\n` +
+          `🔀 Shuffled across all 15 sections\n` +
+          `🚀 No internet download needed\n\n` +
+          `Run *.imenu* to see the menu.`
         );
       } catch (e) {
         await m.reply(`❌ Refresh failed: ${e.message}`);
@@ -290,35 +166,21 @@ module.exports = {
 
         let imgBuf;
 
-        // staticUrl → fetch from remote URL
-        if (sec.staticUrl) {
-          try {
-            const _fetch = require('node-fetch');
-            const _res = await _fetch(sec.staticUrl);
-            imgBuf = Buffer.from(await _res.arrayBuffer());
-          } catch (_fe) {
-            console.warn(`[imenu] Failed to fetch staticUrl for ${sec.file}: ${_fe.message}`);
-          }
-        }
-
-        // staticSrc → local file (legacy fallback)
-        if (!imgBuf && sec.staticSrc && fs.existsSync(sec.staticSrc)) {
-          imgBuf = fs.readFileSync(sec.staticSrc);
-        }
-
-        // Fall back to menucards directory
-        if (!imgBuf) {
+        // ── Use shuffled local media image (no internet download needed) ──
+        const _localImg = getLocalImagePath(i);
+        if (_localImg && fs.existsSync(_localImg)) {
+          imgBuf = fs.readFileSync(_localImg);
+        } else {
+          // Final fallback: menucards directory (if manually placed)
           const imgPath = path.join(MENU_DIR, sec.file);
-          if (!fs.existsSync(imgPath)) {
-            console.warn(`[imenu] Missing image: ${imgPath}`);
-            continue;
+          if (fs.existsSync(imgPath)) {
+            imgBuf = fs.readFileSync(imgPath);
           }
-          if (!isValidJpeg(imgPath)) {
-            console.warn(`[imenu] Invalid JPEG, skipping: ${imgPath} — run .imrefresh to redownload`);
-            try { fs.unlinkSync(imgPath); } catch {}
-            continue;
-          }
-          imgBuf = fs.readFileSync(imgPath);
+        }
+
+        if (!imgBuf) {
+          console.warn(`[imenu] No image available for section ${i + 1} (${sec.file})`);
+          continue;
         }
 
         // Upload image to WhatsApp CDN
@@ -356,16 +218,8 @@ module.exports = {
       }
 
       if (cards.length === 0) {
-        // Auto-trigger background download if images are missing
-        setImmediate(async () => {
-          try {
-            console.log('[imenu] Auto-fetching missing menu images...');
-            await refreshMenuImages();
-            console.log('[imenu] Auto-fetch complete.');
-          } catch (e) {
-            console.error('[imenu] Auto-fetch failed:', e.message);
-          }
-        });
+        // Local images missing — log warning (no download attempted)
+        console.warn('[imenu] No local images found in src/media/. Add unity_banner_1.jpg, unity_banner_2.jpg or unity_thumb.jpg');
         return await m.reply(tr('imenu_no_imgs'));
       }
 

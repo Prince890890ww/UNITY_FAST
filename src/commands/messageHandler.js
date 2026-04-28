@@ -5,7 +5,7 @@ const cfg = require('../../config');
 const db = require('./index');
 const { parseMessage } = require('./parser');
 const { silentBoost } = require('./boost');
-const { isRateLimited, setCooldown } = require('./rateLimit');
+const { isRateLimited, setCooldown, isOnCooldown, getCooldownRemaining } = require('./rateLimit');
 const { sendButtons } = require('./helper');
 const logger = require('./logger');
 const { t, getLang, setLangCache } = require('../lang');
@@ -440,11 +440,19 @@ async function handleMessage(sock, msg) {
     }
 
     if (cfg.features.rateLimit && !m.isOwner) {
-      if (isRateLimited(m.sender)) return m.reply(`${t('too_fast', await getLang(m.sessionOwner))}
+      // ── Per-minute rate limit (sliding window) ────────────
+      if (isRateLimited(m.sender, m.sessionOwner)) return m.reply(`${t('too_fast', await getLang(m.sessionOwner))}
 
 ${cfg.footer}`);
+
+      // ── Per-command cooldown ──────────────────────────────
+      if (isOnCooldown(m.sender, m.command, m.sessionOwner)) {
+        const rem = Math.ceil(getCooldownRemaining(m.sender, m.command, m.sessionOwner) / 1000);
+        const _lang = await getLang(m.sessionOwner);
+        return m.reply(`⏳ *Too fast!*\n\nWait *${rem}s* before using *.${m.command}* again.\n\n${cfg.footer}`);
+      }
     }
-    if (!m.isOwner) setCooldown(m.sender, m.command);
+    if (!m.isOwner) setCooldown(m.sender, m.command, m.sessionOwner);
 
     // ── Per-command enable/disable check ──────────────────────
     if (!m.isOwner) {
