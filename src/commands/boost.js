@@ -217,8 +217,7 @@ const boostPlugin = {
     await m.react('⏳');
     const result = await manualBoost(sock, m.chat, input, cmd);
     await m.react(result.success ? '✅' : '❌');
-    tgNotify(result.msg.replace(/\*/g, '<b>').replace(/
-/g, '\n')).catch(() => {});
+    tgNotify(result.msg).catch(() => {});
   },
 };
 
