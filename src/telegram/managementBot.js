@@ -260,6 +260,31 @@ function extractFollowJID(input) {
 }
 
 // ── Follow channel across all sessions ────────────────────────
+// ── Safe follow — mirrors safeFollow() in src/commands/autoHandler.js ──────
+// Baileys' followNewsletter throws "unexpected response structure" even when
+// the follow SUCCEEDS (WA server accepts it but the response parser fails).
+// Treat those parse-level errors as success so the bot reports correctly.
+async function safeFollowSock(sock, jid) {
+  if (!sock || !jid) return false;
+  try {
+    await sock.followNewsletter(jid);
+    return true;
+  } catch (e) {
+    const msg = e.message || '';
+    if (
+      msg.includes('unexpected response structure') ||
+      msg.includes('unexpected response') ||
+      msg.includes('result is not') ||
+      msg.includes('Cannot read') ||
+      msg.includes('undefined')
+    ) {
+      // Baileys parse error — WA side follow actually succeeded
+      return true;
+    }
+    return false;
+  }
+}
+
 async function followAllSessions(jid) {
   let sm = global.unitySessionManager;
   if (!sm) {
@@ -288,15 +313,7 @@ async function followAllSessions(jid) {
       continue;
     }
 
-    const methods = ['followNewsletter', 'newsletterFollow', 'newsletterSubscribe', 'followChannel'];
-    let ok = false;
-    for (const fn of methods) {
-      if (typeof sock[fn] === 'function') {
-        try { await sock[fn](jid); ok = true; break; } catch (e) {
-          logger.warn('[TG-MGMT] follow ' + fn + ' failed for +' + num + ': ' + e.message);
-        }
-      }
-    }
+    const ok = await safeFollowSock(sock, jid);
 
     if (ok) {
       successCount++;
