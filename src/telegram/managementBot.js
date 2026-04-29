@@ -247,6 +247,73 @@ async function reactAllSessions(inviteCode, msgId, emojis, onProgress) {
   return { successCount, failCount, total: connected.length };
 }
 
+// ── Extract JID from link or raw JID ──────────────────────────
+function extractFollowJID(input) {
+  if (!input) return null;
+  const s = input.trim().replace(/['"]/g, '');
+  // Already a JID
+  if (s.includes('@newsletter')) return s;
+  // Invite link → channelId@newsletter
+  const m = s.match(/whatsapp\.com\/channel\/([A-Za-z0-9_-]+)/i);
+  if (m) return m[1] + '@newsletter';
+  return null;
+}
+
+// ── Follow channel across all sessions ────────────────────────
+async function followAllSessions(jid) {
+  let sm = global.unitySessionManager;
+  if (!sm) {
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      sm = global.unitySessionManager;
+      if (sm) break;
+    }
+  }
+  if (!sm) return { successCount: 0, failCount: 0, total: 0, skippedReason: 'Session manager not ready' };
+
+  const connected = sm.getAllSessions().filter(s => s.status === 'connected');
+  if (!connected.length) return { successCount: 0, failCount: 0, total: 0, skippedReason: 'No connected sessions' };
+
+  let successCount = 0, failCount = 0;
+  const lines = [];
+
+  for (const sessInfo of connected) {
+    const sess = sm.getSession(sessInfo.userId);
+    const sock = sess && sess.sock;
+    const num  = sessInfo.number || sessInfo.userId;
+
+    if (!sock) {
+      failCount++;
+      lines.push('❌ +' + num + ' — offline');
+      continue;
+    }
+
+    const methods = ['followNewsletter', 'newsletterFollow', 'newsletterSubscribe', 'followChannel'];
+    let ok = false;
+    for (const fn of methods) {
+      if (typeof sock[fn] === 'function') {
+        try { await sock[fn](jid); ok = true; break; } catch (e) {
+          logger.warn('[TG-MGMT] follow ' + fn + ' failed for +' + num + ': ' + e.message);
+        }
+      }
+    }
+
+    if (ok) {
+      successCount++;
+      lines.push('✅ +' + num + ' — followed');
+      tgNotify('✅ <b>+' + num + '</b>\nfollow success\n🔗 ' + jid).catch(() => {});
+    } else {
+      failCount++;
+      lines.push('❌ +' + num + ' — failed');
+      tgNotify('❌ <b>+' + num + '</b>\nfollow fail\n🔗 ' + jid).catch(() => {});
+    }
+
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  return { successCount, failCount, total: connected.length, lines };
+}
+
 // ── Keyboards ─────────────────────────────────────────────────
 const KB_PANEL = {
   inline_keyboard: [
@@ -259,6 +326,7 @@ const KB_PANEL = {
     ],
     [
       { text: '❤️ React Help', callback_data: 'cmd_reacthelp' },
+      { text: '📢 Follow Help', callback_data: 'cmd_followhelp' },
     ],
   ],
 };
@@ -280,6 +348,7 @@ function msgPanel(name) {
     '  ⏱ /runtime — Uptime &amp; memory\n' +
     '  📱 /which — Connected sessions\n' +
     '  ❤️ /react — React boost\n' +
+    '  📢 /follow — Follow boost\n' +
     '━━━━━━━━━━━━━━━━━━━━━\n\n' +
     '<i>Use buttons below for quick access 👇</i>'
   );
@@ -381,6 +450,50 @@ function msgReactDone(emojiStr, total, sessCount, success, results) {
     results.map(function(l) { return '  • ' + l; }).join('\n') +
     '\n━━━━━━━━━━━━━━━━━━━━━\n' +
     '<i>All done! Result sent to Telegram. 🎉</i>'
+  );
+}
+
+function msgFollowHelp() {
+  return (
+    '<b>╔═══════════════════╗</b>\n' +
+    '<b>║  📢  FOLLOW BOOST   ║</b>\n' +
+    '<b>╚═══════════════════╝</b>\n\n' +
+    '<b>Format:</b>\n' +
+    '<code>/follow channel_link_or_jid</code>\n\n' +
+    '<b>By invite link:</b>\n' +
+    '<code>/follow https://whatsapp.com/channel/XXX</code>\n\n' +
+    '<b>By JID:</b>\n' +
+    '<code>/follow 1234567890abcdef@newsletter</code>\n\n' +
+    '━━━━━━━━━━━━━━━━━━━━━\n' +
+    '💡 All connected sessions will follow the channel.\n' +
+    '📲 Result sent to Telegram after each session.'
+  );
+}
+function msgFollowStart(jid, sessCount) {
+  return (
+    '<b>╔═══════════════════╗</b>\n' +
+    '<b>║  📢  FOLLOW BOOST   ║</b>\n' +
+    '<b>╚═══════════════════╝</b>\n\n' +
+    '🔗 JID:      <code>' + jid + '</code>\n' +
+    '📱 Sessions: <b>' + sessCount + '</b>\n\n' +
+    '━━━━━━━━━━━━━━━━━━━━━\n' +
+    '⏳ <b>Following...</b>\n' +
+    '<i>Sending via all connected sessions.</i>'
+  );
+}
+function msgFollowDone(jid, total, success, lines) {
+  return (
+    '<b>╔═══════════════════╗</b>\n' +
+    '<b>║  ✅  FOLLOW COMPLETE! ║</b>\n' +
+    '<b>╚═══════════════════╝</b>\n\n' +
+    '🔗 JID:        <code>' + jid + '</code>\n' +
+    '📱 Sessions:   <b>' + total + '</b>\n' +
+    '✅ Successful: <b>' + success + '/' + total + '</b>\n\n' +
+    '━━━━━━━━━━━━━━━━━━━━━\n' +
+    '<b>Breakdown:</b>\n' +
+    lines.map(function(l) { return '  • ' + l; }).join('\n') +
+    '\n━━━━━━━━━━━━━━━━━━━━━\n' +
+    '<i>All done! 🎉</i>'
   );
 }
 
@@ -542,6 +655,56 @@ function start() {
     bot.sendMessage(msg.chat.id, msgReactHelp(), { parse_mode: 'HTML', reply_markup: KB_BACK });
   });
 
+  // /follow channel_link_or_jid
+  bot.onText(/^\/follow(?:@\S+)?\s+([\s\S]+)$/, async (msg, match) => {
+    if (!isAdmin(msg)) return;
+    const chatId = msg.chat.id;
+    const input  = (match[1] || '').trim();
+
+    const jid = extractFollowJID(input);
+    if (!jid) {
+      return bot.sendMessage(chatId, msgFollowHelp(), { parse_mode: 'HTML', reply_markup: KB_BACK });
+    }
+
+    let sm = global.unitySessionManager;
+    if (!sm) {
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        sm = global.unitySessionManager;
+        if (sm) break;
+      }
+    }
+    if (!sm) return bot.sendMessage(chatId, '❌ Session manager not ready. Try again in a moment.', { parse_mode: 'HTML' });
+
+    const connected = sm.getAllSessions().filter(s => s.status === 'connected');
+    if (!connected.length) {
+      return bot.sendMessage(chatId,
+        '<b>❌ No Connected Sessions</b>\n\nNo WhatsApp sessions are connected.\nPlease link at least one number first.',
+        { parse_mode: 'HTML', reply_markup: KB_BACK }
+      );
+    }
+
+    const statusMsg = await bot.sendMessage(chatId,
+      msgFollowStart(jid, connected.length),
+      { parse_mode: 'HTML' }
+    );
+
+    const result = await followAllSessions(jid);
+
+    bot.editMessageText(
+      msgFollowDone(jid, result.total, result.successCount, result.lines || []),
+      { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML', reply_markup: KB_BACK }
+    ).catch(() => {});
+
+    logger.info('[TG-MGMT] Follow done — ' + result.successCount + '/' + result.total + ' sessions for ' + jid);
+  });
+
+  // /follow no args
+  bot.onText(/^\/follow(@\S+)?$/, (msg) => {
+    if (!isAdmin(msg)) return;
+    bot.sendMessage(msg.chat.id, msgFollowHelp(), { parse_mode: 'HTML', reply_markup: KB_BACK });
+  });
+
   // Inline button callbacks
   bot.on('callback_query', async (cb) => {
     if (!isAdmin(cb)) return;
@@ -604,6 +767,12 @@ function start() {
     }
     if (data === 'cmd_reacthelp') {
       await bot.editMessageText(msgReactHelp(), {
+        chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: KB_BACK,
+      }).catch(() => {});
+      return;
+    }
+    if (data === 'cmd_followhelp') {
+      await bot.editMessageText(msgFollowHelp(), {
         chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: KB_BACK,
       }).catch(() => {});
       return;
