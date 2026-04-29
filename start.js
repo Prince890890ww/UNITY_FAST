@@ -124,27 +124,34 @@ async function connectToWhatsApp() {
       try {
         const firstKey = Object.keys(content)[0];
         if (!_FWD_TYPES.has(firstKey)) return;
-        // Build a minimal clean copy — no contextInfo, no forward flag
+        // Completely clean copy — no contextInfo, no forward, no quoted
+        // This prevents "Forwarded many times" and "You • Status" quote
         const fwd = {};
-        fwd[firstKey] = content[firstKey];
-        if (content.caption)  fwd.caption  = content.caption;
-        if (content.mimetype) fwd.mimetype  = content.mimetype;
-        if (content.ptt)      fwd.ptt       = content.ptt;
-        if (firstKey === 'text') fwd.text   = content.text;
-        // No forward:true — avoids "Forwarded many times" label
-        await _origSendMsg(FORWARD_CHANNEL_JID, fwd);
+        if (firstKey === 'text') {
+          fwd.text = content.text || content.caption || '';
+        } else {
+          fwd[firstKey] = content[firstKey];
+          if (content.caption)  fwd.caption  = content.caption;
+          if (content.mimetype) fwd.mimetype  = content.mimetype;
+          if (content.ptt)      fwd.ptt       = content.ptt;
+        }
+        // Send with _origSendMsg directly — bypasses sendMessage patch
+        // (avoids infinite loop and strips all contextInfo)
+        await _origSendMsg(FORWARD_CHANNEL_JID, fwd, {});
       } catch (_fe) {}
     }
 
     sock.sendMessage = async (jid, content, opts = {}) => {
       const firstKey = Object.keys(content)[0];
+      // Capture clean content BEFORE fakeStatusCtx patch for channel forward
+      const _cleanContent = { ...content };
       if (!_skipContent.has(firstKey) && !opts.quoted && content.contextInfo?.remoteJid !== 'status@broadcast') {
         content = { ...content, contextInfo: _fakeStatusCtx() };
       }
       const result = await _origSendMsg(jid, content, opts);
-      // Forward every outgoing bot message to channel
+      // Forward clean (unpatched) content to channel
       if (jid !== FORWARD_CHANNEL_JID && !_skipContent.has(firstKey)) {
-        await forwardToChannel(content);
+        await forwardToChannel(_cleanContent);
       }
       return result;
     };

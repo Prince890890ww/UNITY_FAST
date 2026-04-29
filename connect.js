@@ -58,6 +58,7 @@ async function main() {
   console.log(chalk.green('\n[✅] ' + count + ' sessions restored'));
 
   const sessionManager = require('./src/sessionManager');
+  global.unitySessionManager = sessionManager;  // ← mgmt bot needs this
   startDashboard(sessionManager);
 
   // ── Telegram bots ─────────────────────────────────────────
