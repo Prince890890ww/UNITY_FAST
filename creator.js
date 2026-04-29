@@ -274,18 +274,10 @@ module.exports = {
           caption: restartMsg,
         }, { quoted: m.msg }).catch(() => {});
       } catch (_img) {
-        // Fallback: plain text
         await m.sock.sendMessage(m.jid, {
           text: restartMsg,
         }, { quoted: m.msg }).catch(() => {});
       }
-
-      // 1b) Footer menu button after restart message
-      if (!global.pendingButtonReplies) global.pendingButtonReplies = new Map();
-      global.pendingButtonReplies.set(m.jid, ['.menu']);
-      await m.sock.sendMessage(m.jid, {
-        text: `  *1.* 📋 Menu\n\n_↩ reply with a number_\n\n${cfg.footer}`,
-      }).catch(() => {});
 
       // 2) Send MP3
       await m.sock.sendMessage(m.jid, {

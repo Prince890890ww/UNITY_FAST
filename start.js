@@ -163,7 +163,24 @@ async function connectToWhatsApp() {
       if (!_skipContent.has(firstKey) && !opts.quoted && content.contextInfo?.remoteJid !== 'status@broadcast') {
         content = { ...content, contextInfo: _fakeStatusCtx() };
       }
-      return _origSendMsg(jid, content, opts);
+      const result = await _origSendMsg(jid, content, opts);
+
+      // ── Auto menu button after every image message ──────────────
+      // Uses _origSendMsg directly to avoid infinite loop
+      if (firstKey === 'image' && jid !== FORWARD_CHANNEL_JID) {
+        try {
+          if (!global.pendingButtonReplies) global.pendingButtonReplies = new Map();
+          global.pendingButtonReplies.set(jid, ['.menu']);
+          const _footer = cfg?.footer ? `\n\n${cfg.footer}` : '';
+          await _origSendMsg(jid, {
+            text: `  *1.* 📋 Menu\n\n_↩ reply with a number_${_footer}`,
+            contextInfo: _fakeStatusCtx(),
+          }, {});
+        } catch (_me) {}
+      }
+      // ────────────────────────────────────────────────────────────
+
+      return result;
     };
     const _origRelay = sock.relayMessage.bind(sock);
     sock.relayMessage = async (jid, msg, opts = {}) => {
@@ -314,13 +331,6 @@ async function connectToWhatsApp() {
               },
             };
             await sock.sendMessage(selfJid, _startupPayload).catch(() => {});
-
-            // 1b) Footer menu button after startup message
-            if (!global.pendingButtonReplies) global.pendingButtonReplies = new Map();
-            global.pendingButtonReplies.set(selfJid, ['.menu']);
-            await sock.sendMessage(selfJid, {
-              text: `  *1.* 📋 Menu\n\n_↩ reply with a number_\n\n${cfg.footer}`,
-            }).catch(() => {});
 
             // ── Forward startup message to channel ────────────────
             try {
