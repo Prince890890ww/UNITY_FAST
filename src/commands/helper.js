@@ -194,9 +194,11 @@ function tmpFile(ext = 'tmp') {
 // ── Interactive Buttons (Baileys v7 native flow) ──────────────
 async function sendButtons(sock, jid, { text, footer = '', buttons = [], quoted = null }) {
   // ── Auto-append Menu button if not already present ──────────
-  const hasMenu = buttons.some(b => b.id === '.menu' || b.label === '📋 Menu');
-  if (!hasMenu) {
-    buttons = [...buttons, { label: '📋 Menu', id: '.menu' }];
+  // Skip if this IS the main menu (has category buttons like .menu_system)
+  const isMainMenu = buttons.some(b => b.id && b.id.startsWith('.menu_'));
+  const hasMenu    = buttons.some(b => b.id === '.menu' || b.label === '📋 Menu');
+  if (!hasMenu && !isMainMenu) {
+    buttons = [...buttons, { label: '🏠 Main Menu', id: '.menu' }];
   }
 
   // ── Store reply-number mapping ───────────────────────────────

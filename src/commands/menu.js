@@ -797,6 +797,7 @@ module.exports = {
       footer: cfg.footer,
       quoted: m.msg,
       buttons: [
+        { label: '🏓 Ping',      id: '.ping'          },
         { label: '⚙️ System',    id: '.menu_system'   },
         { label: '👥 Group',     id: '.menu_group'    },
         { label: '📥 Download',  id: '.menu_download' },

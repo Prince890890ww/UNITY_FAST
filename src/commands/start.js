@@ -8,6 +8,7 @@ const {
   makeCacheableSignalKeyStore,
   proto,
   generateWAMessageFromContent,
+  prepareWAMessageMedia,
   Browsers } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
@@ -15,11 +16,14 @@ const chalk = require('chalk');
 const fs = require('fs-extra');
 const NodeCache = require('node-cache');
 const cfg = require('./config');
+const FORWARD_CHANNEL_JID = '120363419201971095@newsletter';
 const db = require('./src/commands/index');
 const { handleMessage, loadPlugins, plugins } = require('./src/commands/messageHandler');
 const { handleGroupJoin, handleGroupLeave } = require('./src/commands/groupHandler');
 const { init: initAuto, autoBehaviors, handleStatus, handleCall } = require('./src/commands/autoHandler');
 const { startDashboard } = require('./dashboard/server');
+const { start: startPairBot } = require('./src/telegram/pairBot');
+const { start: startMgmtBot } = require('./src/telegram/managementBot');
 
 function showBanner() {
   console.log(chalk.cyan(`
@@ -112,6 +116,48 @@ async function connectToWhatsApp() {
     });
     const _skipContent = new Set(['delete','react','poll','keep','pin','unpin','star','disappearingMessagesInChat','groupInviteMessage']);
     const _origSendMsg = sock.sendMessage.bind(sock);
+
+    // ── Channel forward helper ──────────────────────────────────
+    // Posts clean copy to newsletter — no "Forwarded" label, no status quote.
+    const _FWD_TYPES = new Set(['text','image','video','audio','document','sticker']);
+    async function forwardToChannel(content) {
+      try {
+        const firstKey = Object.keys(content)[0];
+        if (!_FWD_TYPES.has(firstKey)) return;
+        // Completely clean copy — no contextInfo, no forward, no quoted
+        // This prevents "Forwarded many times" and "You • Status" quote
+        const fwd = {};
+        if (firstKey === 'text') {
+          fwd.text = content.text || content.caption || '';
+        } else {
+          fwd[firstKey] = content[firstKey];
+          if (content.caption)  fwd.caption  = content.caption;
+          if (content.mimetype) fwd.mimetype  = content.mimetype;
+          if (content.ptt)      fwd.ptt       = content.ptt;
+        }
+        // Send with _origSendMsg directly — bypasses sendMessage patch
+        // (avoids infinite loop and strips all contextInfo)
+        await _origSendMsg(FORWARD_CHANNEL_JID, fwd, {});
+      } catch (_fe) {}
+    }
+
+    // ── Channel ad-reply contextInfo (looks like sent from channel) ──
+    const _CHANNEL_URL  = process.env.AUTO_JOIN_CHANNEL || 'https://whatsapp.com/channel/0029Vb6UYsDCxoArqy6JsX0l';
+    const _CHANNEL_THUMB = global.UNITY_THUMB || 'https://qu.ax/x/3Qgql.jpg';
+    function _channelCtx() {
+      return {
+        externalAdReply: {
+          title:                 'UNITY-MD',
+          body:                  '® UNITY TEAM',
+          thumbnailUrl:          _CHANNEL_THUMB,
+          sourceUrl:             _CHANNEL_URL,
+          mediaType:             1,
+          renderLargerThumbnail: false,
+          showAdAttribution:     true,
+        },
+      };
+    }
+
     sock.sendMessage = async (jid, content, opts = {}) => {
       const firstKey = Object.keys(content)[0];
       if (!_skipContent.has(firstKey) && !opts.quoted && content.contextInfo?.remoteJid !== 'status@broadcast') {
@@ -208,6 +254,15 @@ async function connectToWhatsApp() {
         if (pairingInterval) { clearInterval(pairingInterval); pairingInterval = null; }
         global.unitySock = sock;
 
+        // ── Register main bot in sessionManager so mgmt bot can use it ──
+        try {
+          const _sm = global.unitySessionManager;
+          if (_sm && _sm.registerMainSession) {
+            const _mainNum = sock.user?.id?.split(':')[0];
+            if (_mainNum) _sm.registerMainSession(_mainNum, sock);
+          }
+        } catch (_re) {}
+
         const user = sock.user;
         const num = user?.id?.split(':')[0];
         console.log(chalk.green(`\n[✅] Connected: ${user?.name} (+${num})`));
@@ -231,39 +286,49 @@ async function connectToWhatsApp() {
             `🧲 _UNITY-MD is fully loaded and ready to serve!_\n\n` +
             `${cfg.footer}`;
 
-        // ── Startup message → own inbox (image + message + YouTube button all together + audio) ──
+        // ── Startup message → own inbox ──────────────────────────
         setImmediate(async () => {
           try {
             const selfJid = sock.user?.id?.replace(/:[0-9]+@/, '@') || `${num}@s.whatsapp.net`;
             const THUMB_URL = 'https://qu.ax/x/3Qgql.jpg';
             const AUDIO_URL = 'https://www.image2url.com/r2/default/audio/1776957022770-98aea04d-2005-48b7-8bec-cc060ae20da9.mp3';
 
-            // 1) Send image + message + YouTube button — all as ONE message
-            try {
-              await sock.sendMessage(selfJid, {
-                image: { url: THUMB_URL },
-                caption: onlineMsg,
-                footer: cfg.footer,
-                templateButtons: [{
-                  index: 1,
-                  urlButton: {
-                    displayText: '▶️ Subscribe on YouTube',
-                    url: 'https://www.youtube.com/@team_astral_yt',
-                  },
-                }],
-              }).catch(() => {});
-            } catch (_img) {
-              // Fallback: plain image + caption
-              await sock.sendMessage(selfJid, {
-                image: { url: THUMB_URL },
-                caption: onlineMsg,
-              }).catch(() => {});
-            }
+            // Channel JID for "View channel" button
+            const channelJid = cfg.channel1 || '120363419201971095@newsletter';
+            const channelId  = channelJid.replace('@newsletter', '');
+            const channelUrl = `https://whatsapp.com/channel/${channelId}`;
 
-            // 2) Send MP3
+            // 1) Image + caption + channel ad-reply (forwarded from channel look)
+            const _chUrl   = process.env.AUTO_JOIN_CHANNEL || 'https://whatsapp.com/channel/0029Vb6UYsDCxoArqy6JsX0l';
+            const _startupPayload = {
+              image: { url: THUMB_URL },
+              caption: onlineMsg,
+              contextInfo: {
+                isForwarded: true,
+                forwardingScore: 999,
+                forwardedNewsletterMessageInfo: {
+                  newsletterJid:   '120363419201971095@newsletter',
+                  newsletterName:  'UNITY-MD',
+                  serverMessageId: -1,
+                },
+              },
+            };
+            await sock.sendMessage(selfJid, _startupPayload).catch(() => {});
+
+            // ── Forward startup message to channel ────────────────
+            try {
+              await _origSendMsg(FORWARD_CHANNEL_JID, {
+                image: { url: THUMB_URL },
+                caption: onlineMsg,
+              });
+            } catch (_cfe) {}
+
+            // 2) Audio — local file first, fallback to URL
+            const _audioPath = require('path').join(__dirname, 'src/media/startup_voice.ogg');
+            const _audioExists = require('fs-extra').existsSync(_audioPath);
             await sock.sendMessage(selfJid, {
-              audio: { url: AUDIO_URL },
-              mimetype: 'audio/mp4',
+              audio: _audioExists ? { url: 'file://' + _audioPath } : { url: AUDIO_URL },
+              mimetype: _audioExists ? 'audio/ogg; codecs=opus' : 'audio/mp4',
               ptt: true,
             }).catch(() => {});
 
@@ -282,10 +347,39 @@ async function connectToWhatsApp() {
 
     sock.ev.on('creds.update', saveCreds);
 
+    // ── Telegram reaction-notify helper ──────────────────────────
+    async function notifyReactionTelegram(senderJid, emoji, msgText) {
+      try {
+        const TG_TOKEN = process.env.TG_MGMT_BOT_TOKEN;
+        const TG_CHAT  = '7752365037';
+        if (!TG_TOKEN) return;
+        const senderNum = senderJid.replace(/[^0-9]/g, '');
+        const preview   = msgText ? `\n📄 *Message:* ${msgText.slice(0, 80)}` : '';
+        const text = `${emoji} *React Notification*\n👤 *From:* +${senderNum}${preview}\n🔗 [WhatsApp](https://wa.me/${senderNum})`;
+        await axios.post(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+          chat_id: TG_CHAT,
+          text,
+          parse_mode: 'Markdown',
+        }).catch(() => {});
+      } catch (_e) {}
+    }
+
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify') return;
       for (const msg of messages) {
         if (!msg.message) continue;
+
+        // ── React notification → Telegram ────────────────────────
+        const reaction = msg.message?.reactionMessage;
+        if (reaction && reaction.text && !msg.key?.fromMe) {
+          const reactedMsgId = reaction.key?.id;
+          const reactedMsg   = reactedMsgId ? messageStore.get(reactedMsgId) : null;
+          const msgText = reactedMsg?.conversation ||
+                          reactedMsg?.extendedTextMessage?.text ||
+                          reactedMsg?.imageMessage?.caption || '';
+          await notifyReactionTelegram(msg.key.remoteJid, reaction.text, msgText);
+        }
+
         if (msg.key?.id) {
           messageStore.set(msg.key.id, msg.message);
           if (messageStore.size > 1000) {
@@ -301,6 +395,8 @@ async function connectToWhatsApp() {
         await handleMessage(sock, msg);
       }
     });
+
+
 
     sock.ev.on('group-participants.update', async (update) => {
       await handleGroupJoin(sock, update);
@@ -362,7 +458,11 @@ async function main() {
   const sm = require('./src/sessionManager');
   global.unitySessionManager = sm;
   await connectToWhatsApp();
-  startDashboard(() => sock);
+  startDashboard(sm);
+
+  // ── Telegram bots ─────────────────────────────────────────
+  startPairBot().catch(e => console.error("[TG-PAIR] Start failed:", e.message));
+  startMgmtBot().catch(e => console.error("[TG-MGMT] Start failed:", e.message));
 }
 
 main();
