@@ -181,7 +181,7 @@ async function reactOneEmoji(sock, target, emoji) {
 async function reactAllSessions(inviteCode, msgId, emojis, onProgress) {
   let sm = global.unitySessionManager;
   if (!sm) {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 1000));
       sm = global.unitySessionManager;
       if (sm) break;
@@ -340,7 +340,7 @@ function msgReactHelp() {
     '<code>/react (❤️) link1, link2, link3</code>\n\n' +
     '━━━━━━━━━━━━━━━━━━━━━\n' +
     '💡 Each session gets one emoji (round-robin).\n' +
-    '📲 Result sent to WA after each session.'
+    '📲 Result sent to Telegram after each session.'
   );
 }
 function msgReactStart(emojiStr, postCount, sessCount) {
@@ -380,7 +380,7 @@ function msgReactDone(emojiStr, total, sessCount, success, results) {
     '<b>Breakdown:</b>\n' +
     results.map(function(l) { return '  • ' + l; }).join('\n') +
     '\n━━━━━━━━━━━━━━━━━━━━━\n' +
-    '<i>All done! Result sent to WA. 🎉</i>'
+    '<i>All done! Result sent to Telegram. 🎉</i>'
   );
 }
 
@@ -424,7 +424,7 @@ function start() {
     if (!isAdmin(msg)) return;
     let sm = global.unitySessionManager;
     if (!sm) {
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 1000));
         sm = global.unitySessionManager;
         if (sm) break;
@@ -478,7 +478,7 @@ function start() {
 
     let sm = global.unitySessionManager;
     if (!sm) {
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 1000));
         sm = global.unitySessionManager;
         if (sm) break;
