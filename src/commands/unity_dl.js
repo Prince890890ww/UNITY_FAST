@@ -2232,7 +2232,7 @@ async function handlePendingDownload(sock, m) {
   const isOurButton = (
     body.startsWith('__dl_') ||
     body.startsWith('__tt_') ||
-    (pending.type === 'song'   && /^[123]$/.test(body)) ||
+    (pending.type === 'song'   && /^[1234]$/.test(body)) ||
     (pending.type === 'video'  && /^[123456]$/.test(body)) ||
     (pending.type === 'film'  && /^[123]$/.test(body))
   );
@@ -2318,30 +2318,50 @@ async function handlePendingDownload(sock, m) {
 
   // ── SONG download ─────────────────────────────────────────
   if (pending.type === 'song') {
-    const formatMap = { '1': 'Audio 🎵', '2': 'Voice Note 🎤', '3': 'Document 📄', '__dl_mp3': 'Audio 🎵', '__dl_vn': 'Voice Note 🎤', '__dl_doc': 'Document 📄' };
-    let choice = body;
-    let choiceLabel = formatMap[choice] || formatMap[body.split(' ')[0]] || 'Audio 🎵';
 
-    // button key format: "__dl_mp3 URL" — extract type
-    const isIdFormat = body.startsWith('__dl_');
-    const dlType = isIdFormat ? body.split(' ')[0] : null;
-    if (dlType) choice = { '__dl_mp3': '1', '__dl_vn': '2', '__dl_doc': '3' }[dlType] || '1';
+    // ── Resolve choice from body ──────────────────────────────
+    // body can be: "1"/"2"/"3"/"4"  OR  "__dl_mp3 URL" / "__dl_vn URL" / "__dl_doc URL"
+    const dlTypeMap = { '__dl_mp3': '1', '__dl_vn': '2', '__dl_doc': '3' };
+    const formatLabelMap = { '1': 'MP3 🎵', '2': 'Voice Note 🎤', '3': 'Document 📄' };
 
-    const statusKey = pending.statusKey;
+    let choice;
+    if (body.startsWith('__dl_')) {
+      choice = dlTypeMap[body.split(' ')[0]] || '1';
+    } else {
+      choice = body.trim(); // '1', '2', '3', or '4'
+    }
+
+    // Main menu
+    if (choice === '4') {
+      const buttonKey = pending.buttonKey;
+      if (buttonKey) { try { await sock.sendMessage(chat, { delete: buttonKey }); } catch {} }
+      pendingDownload.delete(sender);
+      try { await sock.sendMessage(chat, { text: `📋 *Main Menu*\n━━━━━━━━━━━━━━━━━━━━━━\n${footer}` }, { quoted: pending.quotedMsg }); } catch {}
+      // trigger .menu
+      try {
+        const menuPlugin = require('./menu');
+        if (menuPlugin?.run) await menuPlugin.run({ sock, m: { ...pending.quotedMsg, command: 'menu', text: '', chat, sender, isOwner: true, reply: (t) => sock.sendMessage(chat, { text: t }) } });
+      } catch {}
+      return true;
+    }
+
+    const choiceLabel = formatLabelMap[choice] || 'MP3 🎵';
     const buttonKey = pending.buttonKey;
 
-    // 3️⃣ button msg DELETE
+    // Step 1: Delete format choice button message
     if (buttonKey) { try { await sock.sendMessage(chat, { delete: buttonKey }); } catch {} }
 
-    // 4️⃣ Searching msg → Downloading edit
+    // Step 2: Send fresh "Downloading..." status message (NOT edit — statusKey was null)
+    let statusMsg;
     try {
-      await sock.sendMessage(chat, {
+      statusMsg = await sock.sendMessage(chat, {
         text: `⬇️ *Downloading...*\n━━━━━━━━━━━━━━━━━━━━━━\n🎵 *Song:* ${pending.displayTitle}\n🎶 *Format:* ${choiceLabel}\n⏳ Connecting...\n━━━━━━━━━━━━━━━━━━━━━━\n${footer}`,
-        edit: statusKey,
-      });
+      }, { quoted: pending.quotedMsg });
     } catch {}
+    const liveStatusKey = statusMsg?.key || null;
 
     try {
+      // Step 3: Download
       let downloadResult;
       if (pending.url?.match(/https?:\/\//)) {
         downloadResult = await musicDownloader.downloadByUrl(pending.url);
@@ -2350,57 +2370,62 @@ async function handlePendingDownload(sock, m) {
       }
 
       if (!downloadResult?.success) {
-        await editAutoDelete(sock, chat, `❌ *Download failed!*\n━━━━━━━━━━━━━━━━━━━━━━\n🎵 ${pending.displayTitle}\n⚠️ ${downloadResult?.error || 'Error'}\n━━━━━━━━━━━━━━━━━━━━━━`, statusKey);
+        await editAutoDelete(sock, chat,
+          `❌ *Download failed!*\n━━━━━━━━━━━━━━━━━━━━━━\n🎵 ${pending.displayTitle}\n⚠️ ${downloadResult?.error || 'Error'}\n━━━━━━━━━━━━━━━━━━━━━━`,
+          liveStatusKey);
         return true;
       }
 
-      // 6️⃣ Downloading → Uploading edit
+      // Step 4: Edit → Uploading
       try {
         await sock.sendMessage(chat, {
           text: `⬆️ *Uploading...*\n━━━━━━━━━━━━━━━━━━━━━━\n🎵 *Song:* ${pending.displayTitle}\n🎶 *Format:* ${choiceLabel}\n⏳ Sending to WhatsApp...\n━━━━━━━━━━━━━━━━━━━━━━\n${footer}`,
-          edit: statusKey,
+          edit: liveStatusKey,
         });
       } catch {}
 
-      // 7️⃣ Send media
+      // Step 5: Read file
       const audioBuffer = fs.readFileSync(downloadResult.filePath);
+      const titleShort  = pending.displayTitle.substring(0, 40);
       const mediaCaption = `🎵 *${pending.displayTitle}*\n━━━━━━━━━━━━━━━━━━━━━━\n${footer}`;
-      const titleShort = pending.displayTitle.substring(0, 40);
 
-      // Validate buffer — must be valid MP3 (ID3 header or MPEG sync word)
+      // Validate MP3 header
       const _hdr = audioBuffer.slice(0, 4);
       const _isId3 = _hdr[0] === 0x49 && _hdr[1] === 0x44 && _hdr[2] === 0x33;
       const _isMp3 = _hdr[0] === 0xFF && (_hdr[1] & 0xE0) === 0xE0;
       if (!_isId3 && !_isMp3) {
-        console.error(`[SongDL] ⚠️ Invalid MP3 buffer for: ${pending.displayTitle} — header: ${_hdr.toString('hex')}`);
         await editAutoDelete(sock, chat,
           `❌ *Download failed!*\n━━━━━━━━━━━━━━━━━━━━━━\n🎵 ${pending.displayTitle}\n⚠️ Audio file is corrupt, please try again\n━━━━━━━━━━━━━━━━━━━━━━`,
-          statusKey);
+          liveStatusKey);
         cleanTemp(downloadResult.filePath);
         return true;
       }
 
+      // Step 6: Send by format
       try {
         if (choice === '1') {
+          // MP3 audio
           await sock.sendMessage(chat, {
             audio: audioBuffer,
             mimetype: 'audio/mpeg',
             ptt: false,
             fileName: `${titleShort}.mp3`,
-            contextInfo: { externalAdReply: { title: pending.displayTitle, body: footer, renderLargerThumbnail: false } },
           }, { quoted: pending.quotedMsg });
+
         } else if (choice === '2') {
-          // Voice Note — WhatsApp requires ogg/opus format for ptt
+          // Voice Note — convert MP3 → OGG/Opus using ffmpeg
           let vnBuffer = audioBuffer;
-          let vnMime = 'audio/ogg; codecs=opus';
+          let vnMime   = 'audio/ogg; codecs=opus';
           try {
-            const ffmpeg = require('fluent-ffmpeg');
-            const tmpOgg = path.join(TEMP_DIR, `vn_${Date.now()}.ogg`);
-            const tmpMp3 = path.join(TEMP_DIR, `vn_src_${Date.now()}.mp3`);
-            fs.writeFileSync(tmpMp3, audioBuffer);
+            const ffmpeg  = require('fluent-ffmpeg');
+            const tmpSrc  = path.join(TEMP_DIR, `vn_src_${Date.now()}.mp3`);
+            const tmpOgg  = path.join(TEMP_DIR, `vn_out_${Date.now()}.ogg`);
+            fs.writeFileSync(tmpSrc, audioBuffer);
             await new Promise((res, rej) => {
-              ffmpeg(tmpMp3)
+              ffmpeg(tmpSrc)
                 .audioCodec('libopus')
+                .audioChannels(1)
+                .audioFrequency(48000)
                 .format('ogg')
                 .on('end', res)
                 .on('error', rej)
@@ -2408,18 +2433,24 @@ async function handlePendingDownload(sock, m) {
             });
             if (fs.existsSync(tmpOgg) && fs.statSync(tmpOgg).size > 1000) {
               vnBuffer = fs.readFileSync(tmpOgg);
-              vnMime = 'audio/ogg; codecs=opus';
+            } else {
+              vnMime = 'audio/mpeg'; // ffmpeg failed — fallback
             }
-            try { fs.unlinkSync(tmpMp3); } catch {}
+            try { fs.unlinkSync(tmpSrc); } catch {}
             try { fs.unlinkSync(tmpOgg); } catch {}
-          } catch { /* ffmpeg not available — fallback to mp3 */ vnMime = 'audio/mp4'; }
+          } catch {
+            // ffmpeg not installed — WhatsApp will try to play as-is
+            vnMime = 'audio/mpeg';
+          }
           await sock.sendMessage(chat, {
             audio: vnBuffer,
             mimetype: vnMime,
             ptt: true,
             fileName: `${titleShort}.ogg`,
           }, { quoted: pending.quotedMsg });
+
         } else {
+          // Document
           await sock.sendMessage(chat, {
             document: audioBuffer,
             mimetype: 'audio/mpeg',
@@ -2431,23 +2462,23 @@ async function handlePendingDownload(sock, m) {
         console.error(`[SongDL] ❌ Send failed: ${_sendErr.message}`);
         await editAutoDelete(sock, chat,
           `❌ *Upload failed!*\n━━━━━━━━━━━━━━━━━━━━━━\n🎵 ${pending.displayTitle}\n⚠️ WhatsApp rejected the file, please try again\n━━━━━━━━━━━━━━━━━━━━━━`,
-          statusKey);
+          liveStatusKey);
         cleanTemp(downloadResult.filePath);
         return true;
       }
 
       cleanTemp(downloadResult.filePath);
 
-      // 8️⃣ Uploading → Done (auto-delete)
+      // Step 7: Edit → Done (auto-delete)
       const fileSizeMB = (audioBuffer.length / (1024 * 1024)).toFixed(2);
       await editAutoDelete(sock, chat,
         `✅ *Done!*\n━━━━━━━━━━━━━━━━━━━━━━\n🎵 *Song:* ${pending.displayTitle}\n🎶 *Format:* ${choiceLabel}\n📦 *Size:* ${fileSizeMB} MB\n━━━━━━━━━━━━━━━━━━━━━━`,
-        statusKey);
+        liveStatusKey);
 
     } catch (err) {
       await editAutoDelete(sock, chat,
         `❌ *Error!*\n━━━━━━━━━━━━━━━━━━━━━━\n⚠️ ${err.message?.substring(0, 150)}\n━━━━━━━━━━━━━━━━━━━━━━`,
-        statusKey);
+        liveStatusKey);
     }
     return true;
   }
@@ -3015,12 +3046,13 @@ module.exports = {
       try { if (searchKey) await sock.sendMessage(chat, { delete: searchKey }); } catch {}
 
       const btnMsg = await sendButtons(sock, chat, {
-        text: `🎯 *Found!*\n━━━━━━━━━━━━━━━━━━━━━━\n🎵 *Song:* ${displayTitle}\n🔗 ${videoUrl}\n━━━━━━━━━━━━━━━━━━━━━━\nChoose format:\n${footer}`,
+        text: `🎯 *Found!*\n━━━━━━━━━━━━━━━━━━━━━━\n🎵 *Song:* ${displayTitle}\n🔗 ${videoUrl}\n━━━━━━━━━━━━━━━━━━━━━━\n*Choose download format:*\n\n1️⃣ MP3 Audio 🎵\n2️⃣ Voice Note 🎤\n3️⃣ Document 📄\n4️⃣ Main Menu 🏠\n\n*reply with a number*\n━━━━━━━━━━━━━━━━━━━━━━\n${footer}`,
         footer,
         buttons: [
-          { label: '1️⃣ Audio (🎵 MP3)',       id: `__dl_mp3 ${videoUrl}` },
-          { label: '2️⃣ Voice Note (🎤)',       id: `__dl_vn ${videoUrl}` },
-          { label: '3️⃣ Document (📄)',         id: `__dl_doc ${videoUrl}` },
+          { label: '1️⃣ MP3 Audio 🎵',    id: `__dl_mp3 ${videoUrl}` },
+          { label: '2️⃣ Voice Note 🎤',   id: `__dl_vn ${videoUrl}` },
+          { label: '3️⃣ Document 📄',      id: `__dl_doc ${videoUrl}` },
+          { label: '4️⃣ Main Menu 🏠',     id: `__dl_menu` },
         ],
         quoted: m.msg,
       });
