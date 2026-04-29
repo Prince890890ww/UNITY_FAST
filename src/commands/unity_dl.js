@@ -1369,7 +1369,15 @@ class MusicDownloader {
     for (const m of apiMethods) {
       try {
         const fp = await m.fn();
-        if (fp && fs.existsSync(fp) && fs.statSync(fp).size > 1000) {
+        if (fp && fs.existsSync(fp) && fs.statSync(fp).size > 50000) {  // min 50KB — avoids corrupt/incomplete files
+          // Validate MP3 magic bytes (ID3 or 0xFF 0xFB/0xFA/0xF3)
+          const _fd = fs.openSync(fp, 'r');
+          const _hdr = Buffer.alloc(4);
+          fs.readSync(_fd, _hdr, 0, 4, 0);
+          fs.closeSync(_fd);
+          const _isId3 = _hdr[0] === 0x49 && _hdr[1] === 0x44 && _hdr[2] === 0x33;
+          const _isMp3 = _hdr[0] === 0xFF && (_hdr[1] & 0xE0) === 0xE0;
+          if (!_isId3 && !_isMp3) { console.log(`[MusicDL] ⚠️ ${m.name}: invalid MP3 header, skipping`); try { fs.unlinkSync(fp); } catch {} continue; }
           console.log(`[MusicDL] ✅ ${m.name}`);
           return { success: true, method: m.name, filePath: fp, fileName: path.basename(fp) };
         }
