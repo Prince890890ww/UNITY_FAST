@@ -432,12 +432,14 @@ async function autoBehaviors(socket, msg) {
   }
 
   // ── Auto voice/sticker/reply triggers ────────────────────
+  // fromMe: true = owner typed on their phone (Baileys marks session owner msgs as fromMe)
+  // Allow fromMe so owner messages also trigger reply commands.
   const body =
     msg.message?.conversation ||
     msg.message?.extendedTextMessage?.text ||
     msg.message?.imageMessage?.caption || '';
 
-  if (body && !msg.key?.fromMe) {
+  if (body) {
     const dataDir = require('path').join(process.cwd(), 'data');
     const fs = require('fs');
     const _sid = socket.sessionOwner || 'default';
