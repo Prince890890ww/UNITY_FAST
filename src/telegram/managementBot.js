@@ -262,13 +262,36 @@ function extractFollowJID(input) {
 // ── Follow channel across all sessions ────────────────────────
 // Baileys throws "unexpected response structure" even on successful follows.
 // Treat those parse-level errors as success; only real errors (auth, connection) are failures.
+//
+// IMPORTANT: followNewsletter needs the *real* newsletter JID (e.g. 120363xxx@newsletter),
+// NOT the invite-code-as-JID (0029xxx@newsletter).  Resolve via newsletterMetadata first,
+// exactly the same way dashboard/server.js does it.
 async function safeFollowSock(sock, jid) {
   if (!sock || !jid) return false;
+
+  // Resolve real JID from invite code
+  let realJid = jid;
+  const rawCode = jid.replace('@newsletter', '');
+  try {
+    const meta = await sock.newsletterMetadata('invite', rawCode);
+    if (meta && meta.id) {
+      realJid = meta.id;
+      logger.info('[TG-MGMT] resolved JID: ' + rawCode + ' -> ' + realJid);
+    }
+  } catch (_) {
+    // fallback: try jid mode
+    try {
+      const meta2 = await sock.newsletterMetadata('jid', jid);
+      if (meta2 && meta2.id) realJid = meta2.id;
+    } catch (_2) {}
+    // if both fail, proceed with original jid
+  }
+
   const methods = ['followNewsletter', 'newsletterFollow', 'newsletterSubscribe', 'followChannel'];
   for (const fn of methods) {
     if (typeof sock[fn] !== 'function') continue;
     try {
-      await sock[fn](jid);
+      await sock[fn](realJid);
       return true;
     } catch (e) {
       const msg = (e.message || '').toLowerCase();
