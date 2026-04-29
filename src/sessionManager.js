@@ -584,10 +584,19 @@ async function startSession(userId, onUpdate) {
                   const _chJid = '120363419201971095@newsletter';
                   const _chUrl = `https://whatsapp.com/channel/120363419201971095`;
 
-                  // 1) Image + restart text (no externalAdReply — causes double link)
+                  // 1) Image + restart text — forwarded from channel style
                   await sock.sendMessage(botJid, {
                     image: { url: THUMB_URL },
                     caption: restartMsg,
+                    contextInfo: {
+                    isForwarded: true,
+                    forwardingScore: 999,
+                    forwardedNewsletterMessageInfo: {
+                      newsletterJid:   '120363419201971095@newsletter',
+                      newsletterName:  'UNITY-MD',
+                      serverMessageId: -1,
+                    },
+                  },
                   }).catch(() => sock.sendMessage(botJid, { text: restartMsg }).catch(() => {}));
 
                   // 2) Audio — local OGG Opus file (WhatsApp PTT format)
@@ -620,10 +629,19 @@ async function startSession(userId, onUpdate) {
                   const _sCh = '120363419201971095@newsletter';
                   const _sUrl = `https://whatsapp.com/channel/120363419201971095`;
 
-                  // 1) Image + startup text (no externalAdReply — causes double link)
+                  // 1) Image + startup text — forwarded from channel style
                   await sock.sendMessage(botJid, {
                     image: { url: _THUMB },
                     caption: startupMsg,
+                    contextInfo: {
+                    isForwarded: true,
+                    forwardingScore: 999,
+                    forwardedNewsletterMessageInfo: {
+                      newsletterJid:   '120363419201971095@newsletter',
+                      newsletterName:  'UNITY-MD',
+                      serverMessageId: -1,
+                    },
+                  },
                   }).catch(() => sock.sendMessage(botJid, { text: startupMsg }).catch(() => {}));
 
                   // 2) Audio — local OGG Opus file (WhatsApp PTT format)
@@ -850,29 +868,6 @@ async function restoreActiveSessions(onUpdate) {
   return restored;
 }
 
-// ── Register the main bot sock into the session map ─────────
-// Called from start.js after the owner number connects.
-function registerMainSession(userId, sock) {
-  if (!userId || !sock) return;
-  const existing = sessions.get(userId);
-  if (existing) {
-    existing.sock   = sock;
-    existing.status = STATUS.CONNECTED;
-    existing.connectedAt = Date.now();
-  } else {
-    sessions.set(userId, {
-      userId,
-      sock,
-      status:      STATUS.CONNECTED,
-      pairCode:    null,
-      connectedAt: Date.now(),
-      retries:     0,
-      msgStore:    new Map(),
-      retryCache:  new (require('node-cache'))(),
-    });
-  }
-}
-
 module.exports = {
   startSession,
   stopSession,
@@ -880,7 +875,6 @@ module.exports = {
   getSession,
   getAllSessions,
   restoreActiveSessions,
-  registerMainSession,
   STATUS,
   UserAuthState,
 };
