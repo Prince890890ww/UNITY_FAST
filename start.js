@@ -114,7 +114,7 @@ async function connectToWhatsApp() {
         Math.floor(Math.random()*16).toString(16).toUpperCase()).join(''),
       quotedMessage: { conversation: 'Wait loading menu...' },
     });
-    const _skipContent = new Set(['delete','react','poll','keep','pin','unpin','star','disappearingMessagesInChat','groupInviteMessage']);
+    const _skipContent = new Set(['delete','react','poll','keep','pin','unpin','star','disappearingMessagesInChat','groupInviteMessage','audio','video','document','sticker']);
     const _origSendMsg = sock.sendMessage.bind(sock);
 
     // ── Channel forward helper ──────────────────────────────────
