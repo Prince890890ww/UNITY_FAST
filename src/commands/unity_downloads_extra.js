@@ -559,7 +559,13 @@ module.exports = {
           await sock.sendMessage(chat, { document: { url: sd }, mimetype: 'video/mp4', fileName: 'FB_Video.mp4', caption: cfg.footer }, { quoted: reply });
           sock.ev.off('messages.upsert', listener);
         } else if (repText === '2.3') {
-          await sock.sendMessage(chat, { audio: { url: sd }, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: reply });
+          try {
+            const _axDlEx = require('axios');
+            const _arEx   = await _axDlEx.get(sd, { responseType: 'arraybuffer', timeout: 20000 });
+            await sock.sendMessage(chat, { audio: Buffer.from(_arEx.data), mimetype: 'audio/mpeg', ptt: true }, { quoted: reply });
+          } catch (_eEx) {
+            await sock.sendMessage(chat, { audio: { url: sd }, mimetype: 'audio/mpeg', ptt: true }, { quoted: reply });
+          }
           sock.ev.off('messages.upsert', listener);
         }
       });

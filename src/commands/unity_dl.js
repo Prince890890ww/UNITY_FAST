@@ -2370,8 +2370,9 @@ async function handlePendingDownload(sock, m) {
       } else if (choice === '2') {
         await sock.sendMessage(chat, {
           audio: audioBuffer,
-          mimetype: 'audio/ogg; codecs=opus',
+          mimetype: 'audio/mpeg',
           ptt: true,
+          fileName: `${titleShort}.mp3`,
         }, { quoted: pending.quotedMsg });
       } else {
         await sock.sendMessage(chat, {
