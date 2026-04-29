@@ -539,8 +539,6 @@ ${cfg.footer}`);
          content.audio || content.sticker || content.document || content.buttonMessage ||
          content.templateMessage || content.interactiveMessage || content.listMessage)
       ) {
-        const _chUrl   = process.env.AUTO_JOIN_CHANNEL || 'https://whatsapp.com/channel/0029Vb6UYsDCxoArqy6JsX0l';
-        const _chThumb = global.UNITY_THUMB || 'https://qu.ax/x/3Qgql.jpg';
         const fwdCtx = {
           isForwarded: true,
           forwardingScore: 999,
@@ -550,14 +548,10 @@ ${cfg.footer}`);
           stanzaId:    '3EB0' + [...Array(16)].map(() =>
             Math.floor(Math.random()*16).toString(16).toUpperCase()).join(''),
           quotedMessage: { conversation: 'Wait loading menu...' },
-          externalAdReply: {
-            title:                 'UNITY-MD',
-            body:                  '® UNITY TEAM',
-            thumbnailUrl:          _chThumb,
-            sourceUrl:             _chUrl,
-            mediaType:             1,
-            renderLargerThumbnail: false,
-            showAdAttribution:     true,
+          forwardedNewsletterMessageInfo: {
+            newsletterJid:   '120363419201971095@newsletter',
+            newsletterName:  'UNITY-MD',
+            serverMessageId: -1,
           },
         };
         return { ...content, contextInfo: fwdCtx };
