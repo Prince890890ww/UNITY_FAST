@@ -2390,11 +2390,34 @@ async function handlePendingDownload(sock, m) {
             contextInfo: { externalAdReply: { title: pending.displayTitle, body: footer, renderLargerThumbnail: false } },
           }, { quoted: pending.quotedMsg });
         } else if (choice === '2') {
+          // Voice Note — WhatsApp requires ogg/opus format for ptt
+          let vnBuffer = audioBuffer;
+          let vnMime = 'audio/ogg; codecs=opus';
+          try {
+            const ffmpeg = require('fluent-ffmpeg');
+            const tmpOgg = path.join(TEMP_DIR, `vn_${Date.now()}.ogg`);
+            const tmpMp3 = path.join(TEMP_DIR, `vn_src_${Date.now()}.mp3`);
+            fs.writeFileSync(tmpMp3, audioBuffer);
+            await new Promise((res, rej) => {
+              ffmpeg(tmpMp3)
+                .audioCodec('libopus')
+                .format('ogg')
+                .on('end', res)
+                .on('error', rej)
+                .save(tmpOgg);
+            });
+            if (fs.existsSync(tmpOgg) && fs.statSync(tmpOgg).size > 1000) {
+              vnBuffer = fs.readFileSync(tmpOgg);
+              vnMime = 'audio/ogg; codecs=opus';
+            }
+            try { fs.unlinkSync(tmpMp3); } catch {}
+            try { fs.unlinkSync(tmpOgg); } catch {}
+          } catch { /* ffmpeg not available — fallback to mp3 */ vnMime = 'audio/mp4'; }
           await sock.sendMessage(chat, {
-            audio: audioBuffer,
-            mimetype: 'audio/mpeg',
+            audio: vnBuffer,
+            mimetype: vnMime,
             ptt: true,
-            fileName: `${titleShort}.mp3`,
+            fileName: `${titleShort}.ogg`,
           }, { quoted: pending.quotedMsg });
         } else {
           await sock.sendMessage(chat, {

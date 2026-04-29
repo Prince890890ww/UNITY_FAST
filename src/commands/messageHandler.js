@@ -297,6 +297,13 @@ async function handleMessage(sock, msg) {
         if (ppHandled) return;
       } catch {}
 
+      // ── Download button tap handler (__dl_xxx / __tt_xxx / 1-6) ──
+      try {
+        const { handlePendingDownload } = require('./unity_dl');
+        const dlHandled = await handlePendingDownload(sock, m);
+        if (dlHandled) return;
+      } catch {}
+
       // ── Language button tap handler (__lang_en / __lang_si / __lang_ta) ──
       const body = m.body || '';
       const langTapMap = {
