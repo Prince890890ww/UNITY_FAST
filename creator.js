@@ -279,12 +279,17 @@ module.exports = {
         }, { quoted: m.msg }).catch(() => {});
       }
 
-      // 2) Send MP3
-      await m.sock.sendMessage(m.jid, {
-        audio: { url: AUDIO_URL },
-        mimetype: 'audio/mp4',
-        ptt: true,
-      }).catch(() => {});
+      // 2) Send MP3 (buffer method — avoids corrupt audio error)
+      try {
+        const _axAudio = require('axios');
+        const _ar      = await _axAudio.get(AUDIO_URL, { responseType: 'arraybuffer', timeout: 20000 });
+        const _audioBuf = Buffer.from(_ar.data);
+        await m.sock.sendMessage(m.jid, {
+          audio:    _audioBuf,
+          mimetype: 'audio/mpeg',
+          ptt:      true,
+        }).catch(() => {});
+      } catch (_ae) {}
 
       logger.warn('[CREATOR] Restart command executed');
       setTimeout(() => process.exit(1), 1500);

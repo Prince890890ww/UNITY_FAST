@@ -340,14 +340,26 @@ async function connectToWhatsApp() {
               });
             } catch (_cfe) {}
 
-            // 2) Audio — local file first, fallback to URL
-            const _audioPath = require('path').join(__dirname, 'src/media/startup_voice.ogg');
-            const _audioExists = require('fs-extra').existsSync(_audioPath);
-            await sock.sendMessage(selfJid, {
-              audio: _audioExists ? { url: 'file://' + _audioPath } : { url: AUDIO_URL },
-              mimetype: _audioExists ? 'audio/ogg; codecs=opus' : 'audio/mp4',
-              ptt: true,
-            }).catch(() => {});
+            // 2) Audio — local file first, fallback to URL (buffer method — avoids corrupt audio error)
+            try {
+              const _audioPath = require('path').join(__dirname, 'src/media/startup_voice.ogg');
+              const _fs2       = require('fs-extra');
+              let _audioBuf, _audioMime;
+              if (_fs2.existsSync(_audioPath)) {
+                _audioBuf  = _fs2.readFileSync(_audioPath);
+                _audioMime = 'audio/ogg; codecs=opus';
+              } else {
+                const _axAudio = require('axios');
+                const _ar      = await _axAudio.get(AUDIO_URL, { responseType: 'arraybuffer', timeout: 20000 });
+                _audioBuf  = Buffer.from(_ar.data);
+                _audioMime = 'audio/mpeg';
+              }
+              await sock.sendMessage(selfJid, {
+                audio:    _audioBuf,
+                mimetype: _audioMime,
+                ptt:      true,
+              }).catch(() => {});
+            } catch (_ae) {}
 
           } catch (_e) {}
         });
