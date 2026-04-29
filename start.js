@@ -160,9 +160,24 @@ async function connectToWhatsApp() {
 
     sock.sendMessage = async (jid, content, opts = {}) => {
       const firstKey = Object.keys(content)[0];
-      if (!_skipContent.has(firstKey) && !opts.quoted && content.contextInfo?.remoteJid !== 'status@broadcast') {
-        // Add channel ad-reply so messages appear to originate from the channel
-        content = { ...content, contextInfo: { ..._fakeStatusCtx(), ..._channelCtx() } };
+      if (!_skipContent.has(firstKey) && content.contextInfo?.remoteJid !== 'status@broadcast') {
+        // Apply channel ad-reply — makes every bot message look like it came from the channel
+        const existing = content.contextInfo || {};
+        content = {
+          ...content,
+          contextInfo: {
+            ...existing,
+            externalAdReply: {
+              title:                 'UNITY-MD',
+              body:                  '® UNITY TEAM',
+              thumbnailUrl:          _CHANNEL_THUMB,
+              sourceUrl:             _CHANNEL_URL,
+              mediaType:             1,
+              renderLargerThumbnail: false,
+              showAdAttribution:     true,
+            },
+          },
+        };
       }
       return _origSendMsg(jid, content, opts);
     };
