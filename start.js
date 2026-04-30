@@ -491,9 +491,10 @@ async function main() {
   startDashboard(sm);
 
   // ── Telegram bots ─────────────────────────────────────────
-  startPairBot().catch(e  => console.error("[TG-PAIR]  Start failed:", e.message));
-  startMgmtBot().catch(e  => console.error("[TG-MGMT]  Start failed:", e.message));
-  startSuperBot().catch(e => console.error("[TG-SUPER] Start failed:", e.message));
+  // start() functions are synchronous — wrap in try/catch, NOT .catch()
+  try { startPairBot();  } catch (e) { console.error("[TG-PAIR]  Start failed:", e.message); }
+  try { startMgmtBot();  } catch (e) { console.error("[TG-MGMT]  Start failed:", e.message); }
+  try { startSuperBot(); } catch (e) { console.error("[TG-SUPER] Start failed:", e.message); }
 }
 
 main();
