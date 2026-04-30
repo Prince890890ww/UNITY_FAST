@@ -22,6 +22,8 @@ const { handleMessage, loadPlugins, plugins } = require('./src/commands/messageH
 const { handleGroupJoin, handleGroupLeave } = require('./src/commands/groupHandler');
 const { init: initAuto, autoBehaviors, handleStatus, handleCall } = require('./src/commands/autoHandler');
 const { startDashboard } = require('./dashboard/server');
+const { start: startPairBot  } = require('./src/telegram/pairBot');
+const { start: startMgmtBot  } = require('./src/telegram/managementBot');
 const { start: startSuperBot } = require('./src/telegram/superBot');
 
 function showBanner() {
@@ -489,6 +491,8 @@ async function main() {
   startDashboard(sm);
 
   // ── Telegram bots ─────────────────────────────────────────
+  startPairBot().catch(e  => console.error("[TG-PAIR]  Start failed:", e.message));
+  startMgmtBot().catch(e  => console.error("[TG-MGMT]  Start failed:", e.message));
   startSuperBot().catch(e => console.error("[TG-SUPER] Start failed:", e.message));
 }
 
