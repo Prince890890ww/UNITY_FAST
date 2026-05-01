@@ -213,6 +213,7 @@ const ALWAYS_ON_CMDS = new Set([
   'clearchat', 'chatclear', 'auditlog',
   'cmds', 'cmdson', 'cmdsoff', 'cmdtoggle',
   '_setlang',
+  'save',
 ]);
 
 // ── Database Functions ────────────────────────────────────────

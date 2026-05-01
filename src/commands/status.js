@@ -17,6 +17,8 @@ module.exports = {
     // ── New status commands (2026 new methods) ──
     'savestatus', 'dlstatus', 'statusemoji',
     'autostatus', 'autostatusreact',
+    // ── Status reply save ──
+    'save',
   ],
 
   async run({ sock, m }) {
@@ -24,6 +26,109 @@ module.exports = {
     const cmd = m.command;
     const text = m.text?.trim();
     const chat = m.chat;
+
+    // ══════════════════════════════════════════════════════════════
+    // ── .save — Reply to a status → forward media to own chat ────
+    // ══════════════════════════════════════════════════════════════
+    if (cmd === 'save') {
+      if (!m.isOwner) return m.reply(`❌ Owner only!\n\n${cfg.footer}`);
+
+      const quotedMsg = m.quoted;
+      if (!quotedMsg) {
+        return m.reply(
+          `📌 *Usage:* Reply to a status message with *.save*\n\n` +
+          `Bot will forward that status to your own chat.\n\n` +
+          `${cfg.footer}`
+        );
+      }
+
+      const qMsg    = quotedMsg.message || {};
+      const msgType = Object.keys(qMsg)[0] || '';
+      const isImage = msgType === 'imageMessage';
+      const isVideo = msgType === 'videoMessage';
+      const isAudio = msgType === 'audioMessage';
+      const isText  = msgType === 'conversation' || msgType === 'extendedTextMessage';
+      const hasMedia = isImage || isVideo || isAudio;
+
+      // Bot's own private chat (self-message)
+      const selfJid = sock.user?.id?.replace(/:\d+@/, '@') || sock.user?.id;
+
+      if (isText) {
+        const textContent = qMsg.conversation || qMsg.extendedTextMessage?.text || '';
+        await sock.sendMessage(selfJid, {
+          text:
+            `📋 *Saved Status*\n` +
+            `━━━━━━━━━━━━━━━━\n` +
+            `💬 ${textContent}\n\n` +
+            `${cfg.footer}`,
+        });
+        await m.react('✅');
+        return m.reply(`✅ *Text status saved to your chat!*\n\n${cfg.footer}`);
+      }
+
+      if (!hasMedia) {
+        return m.reply(
+          `⚠️ *Could not detect media in this status.*\n\n` +
+          `Supported: image, video, audio, text\n\n` +
+          `${cfg.footer}`
+        );
+      }
+
+      await m.react('⬇️');
+      try {
+        const buf = await sock.downloadMediaMessage({
+          message: quotedMsg.message,
+          key:     quotedMsg.key,
+        });
+
+        if (!buf || !buf.length) throw new Error('Empty media buffer');
+
+        const from =
+          quotedMsg.key?.participant?.split('@')[0] ||
+          quotedMsg.key?.remoteJid?.split('@')[0] ||
+          'unknown';
+
+        if (isVideo) {
+          await sock.sendMessage(selfJid, {
+            video:    buf,
+            mimetype: 'video/mp4',
+            fileName: `status_${from}.mp4`,
+            caption:
+              `🎬 *Saved Status Video*\n` +
+              `👤 From: +${from}\n` +
+              `⏰ ${new Date().toLocaleString('en-LK')}\n\n` +
+              `${cfg.footer}`,
+          });
+        } else if (isAudio) {
+          await sock.sendMessage(selfJid, {
+            audio:    buf,
+            mimetype: 'audio/mp4',
+            ptt:      false,
+          });
+        } else {
+          const caption = qMsg.imageMessage?.caption || '';
+          await sock.sendMessage(selfJid, {
+            image:   buf,
+            caption:
+              `🖼️ *Saved Status Image*\n` +
+              `👤 From: +${from}\n` +
+              `⏰ ${new Date().toLocaleString('en-LK')}\n` +
+              (caption ? `💬 ${caption}\n` : '') +
+              `\n${cfg.footer}`,
+          });
+        }
+
+        await m.react('✅');
+        return m.reply(`✅ *Status saved to your chat!*\n\n${cfg.footer}`);
+      } catch (e) {
+        await m.react('❌');
+        return m.reply(
+          `❌ *Failed to save status.*\n` +
+          `Error: ${e.message}\n\n` +
+          `${cfg.footer}`
+        );
+      }
+    }
 
     // ══════════════════════════════════════════════════════════════
     // ── NEW: Auto Status View toggle ─────────────────────────────
