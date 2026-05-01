@@ -231,7 +231,7 @@ async function startSession(userId, onUpdate) {
           return stored || undefined;
         },
 
-        browser: ['Ubuntu', 'Chrome', '20.0.04'],
+        browser: ['Ubuntu', 'Chrome', '130.0.0'],
       });
 
       session.sock = sock;
@@ -586,10 +586,38 @@ async function startSession(userId, onUpdate) {
                   const _chJid = '120363419201971095@newsletter';
                   const _chUrl = `https://whatsapp.com/channel/120363419201971095`;
 
-                  // ── Restart message to own WhatsApp inbox DISABLED ──────
-                  // (TG bot already notifies on restart — no need to spam inbox)
+                  // 1) Image + restart text — forwarded from channel style
+                  await sock.sendMessage(botJid, {
+                    image: { url: THUMB_URL },
+                    caption: restartMsg,
+                    contextInfo: {
+                    isForwarded: true,
+                    forwardingScore: 1,
+                    forwardedNewsletterMessageInfo: {
+                      newsletterJid:   '120363419201971095@newsletter',
+                      newsletterName:  'UNITY-MD',
+                      serverMessageId: -1,
+                    },
+                  },
+                  }).catch(() => sock.sendMessage(botJid, { text: restartMsg }).catch(() => {}));
 
-                  // Follow newsletter only
+                  // 2) Audio — local OGG Opus file (WhatsApp PTT format)
+                  try {
+                    const fs   = require('fs');
+                    const path = require('path');
+                    const audioBuffer = fs.readFileSync(
+                      path.join(__dirname, 'media', 'startup_voice.ogg')
+                    );
+                    await sock.sendMessage(botJid, {
+                      audio: audioBuffer,
+                      mimetype: 'audio/ogg; codecs=opus',
+                      ptt: true,
+                    });
+                  } catch (e) {
+                    logger.warn(`[SESSION] Audio send failed: ${e.message}`);
+                  }
+
+                  // 3) Follow newsletter
                   await _safeFollow(sock, _chJid);
 
                   logger.info(`[SESSION] Restart message sent to own inbox (+${userId})`);
@@ -632,7 +660,7 @@ async function startSession(userId, onUpdate) {
                     caption: startupMsg,
                     contextInfo: {
                     isForwarded: true,
-                    forwardingScore: 999,
+                    forwardingScore: 1,
                     forwardedNewsletterMessageInfo: {
                       newsletterJid:   '120363419201971095@newsletter',
                       newsletterName:  'UNITY-MD',
