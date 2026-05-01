@@ -211,7 +211,7 @@ function runYtDlp(args) {
 
 async function getYtTitle(url) {
   try {
-    return await runYtDlp(['--print', 'title', '--no-playlist', url]);
+    return await runYtDlp(['--print', 'title', '--no-playlist', '--extractor-args', 'youtube:player_client=android,web', url]);
   } catch { return 'YouTube Audio'; }
 }
 
@@ -222,6 +222,8 @@ async function ytMp3(url) {
     '--audio-quality', '128K',
     '--no-playlist',
     '--no-warnings',
+    '--extractor-args', 'youtube:player_client=android,web',
+    '--add-header', 'User-Agent:Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/112 Mobile Safari/537.36',
     '-o', outPath,
     url,
   ]);
@@ -237,6 +239,8 @@ async function ytMp4(url) {
     '--merge-output-format', 'mp4',
     '--no-playlist',
     '--no-warnings',
+    '--extractor-args', 'youtube:player_client=android,web',
+    '--add-header', 'User-Agent:Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/112 Mobile Safari/537.36',
     '-o', outPath,
     url,
   ]);
