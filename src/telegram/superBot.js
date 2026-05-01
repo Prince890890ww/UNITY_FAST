@@ -22,6 +22,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const axios       = require('axios');
 const fs          = require('fs');
 const path        = require('path');
+const { execFile } = require('child_process');
 // ✅ Fixed: correct path from src/telegram/ to src/commands/logger
 const logger      = require('../commands/logger');
 const db          = require('../commands/index');
@@ -198,181 +199,99 @@ async function axGet(url, opts = {}) {
   return r.data;
 }
 
+// Run yt-dlp as child process and return output path
+function runYtDlp(args) {
+  return new Promise((resolve, reject) => {
+    execFile('yt-dlp', args, { timeout: 120000 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(stderr || err.message));
+      resolve(stdout.trim());
+    });
+  });
+}
+
+async function getYtTitle(url) {
+  try {
+    return await runYtDlp(['--print', 'title', '--no-playlist', url]);
+  } catch { return 'YouTube Audio'; }
+}
+
 async function ytMp3(url) {
-  const vid  = extractYtId(url);
-  const tries = [
-    async () => {
-      const d = await axGet(`https://api.yupra.my.id/api/downloader/ytmp3?url=${encodeURIComponent(url)}`);
-      const u = d?.result?.dl_url || d?.dl_url || d?.data?.dl_url;
-      if (!u) throw new Error('no url');
-      return { url: u, title: d?.result?.title || d?.title || 'YouTube Audio' };
-    },
-    async () => {
-      const d = await axGet(`https://api.siputzx.my.id/api/d/ytmp3?url=${encodeURIComponent(url)}`);
-      const u = d?.data?.url || d?.url;
-      if (!u) throw new Error('no url');
-      return { url: u, title: d?.data?.title || 'YouTube Audio' };
-    },
-    async () => {
-      const d = await axGet(`https://api.znx.my.id/api/ytmp3?url=${encodeURIComponent(url)}`);
-      const u = d?.result?.link || d?.dl_url || d?.url;
-      if (!u) throw new Error('no url');
-      return { url: u, title: d?.result?.title || 'YouTube Audio' };
-    },
-    async () => {
-      if (!vid) throw new Error('no id');
-      const d = await axGet(`https://api.popcat.xyz/ytmp3?videoId=${vid}`);
-      const u = d?.dl_url || d?.url;
-      if (!u) throw new Error('no url');
-      return { url: u, title: d?.title || 'YouTube Audio' };
-    },
-    async () => {
-      const d = await axGet(`https://bk9.fun/download/ytmp3?url=${encodeURIComponent(url)}`);
-      const u = d?.BK9?.dl_url || d?.dl_url || d?.url;
-      if (!u) throw new Error('no url');
-      return { url: u, title: d?.BK9?.title || 'YouTube Audio' };
-    },
-  ];
-  for (const fn of tries) { try { const r = await fn(); if (r) return r; } catch (_) {} }
-  throw new Error('All YouTube MP3 methods failed');
+  const outPath = path.join(TEMP_DIR, 'yt_audio_' + Date.now() + '.mp3');
+  await runYtDlp([
+    '-x', '--audio-format', 'mp3',
+    '--audio-quality', '128K',
+    '--no-playlist',
+    '--no-warnings',
+    '-o', outPath,
+    url,
+  ]);
+  if (!fs.existsSync(outPath)) throw new Error('yt-dlp output file not found');
+  const title = await getYtTitle(url);
+  return { filePath: outPath, title };
 }
 
 async function ytMp4(url) {
-  const vid  = extractYtId(url);
-  const tries = [
-    async () => {
-      const d = await axGet(`https://api.yupra.my.id/api/downloader/ytmp4?url=${encodeURIComponent(url)}`);
-      const u = d?.result?.dl_url || d?.dl_url || d?.data?.dl_url;
-      if (!u) throw new Error('no url');
-      return { url: u, title: d?.result?.title || d?.title || 'YouTube Video', quality: d?.result?.quality || '720p' };
-    },
-    async () => {
-      const d = await axGet(`https://api.siputzx.my.id/api/d/ytmp4?url=${encodeURIComponent(url)}`);
-      const u = d?.data?.url || d?.url;
-      if (!u) throw new Error('no url');
-      return { url: u, title: d?.data?.title || 'YouTube Video', quality: '720p' };
-    },
-    async () => {
-      const d = await axGet(`https://api.znx.my.id/api/ytmp4?url=${encodeURIComponent(url)}`);
-      const u = d?.result?.link || d?.dl_url || d?.url;
-      if (!u) throw new Error('no url');
-      return { url: u, title: d?.result?.title || 'YouTube Video', quality: '720p' };
-    },
-    async () => {
-      if (!vid) throw new Error('no id');
-      const d = await axGet(`https://api.popcat.xyz/ytmp4?videoId=${vid}`);
-      const u = d?.dl_url || d?.url;
-      if (!u) throw new Error('no url');
-      return { url: u, title: d?.title || 'YouTube Video', quality: '720p' };
-    },
-    async () => {
-      for (const host of ['https://api.cobalt.tools', 'https://cobalt.oisd.nl', 'https://cobalt-api.hydrax.net']) {
-        try {
-          const d = await axios.post(host + '/', { url, downloadMode: 'auto', videoQuality: '720' },
-            { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 20000 }).then(r => r.data);
-          if (d?.url) return { url: d.url, title: 'YouTube Video', quality: '720p' };
-        } catch (_) {}
-      }
-      throw new Error('cobalt all failed');
-    },
-  ];
-  for (const fn of tries) { try { const r = await fn(); if (r) return r; } catch (_) {} }
-  throw new Error('All YouTube MP4 methods failed');
+  const outPath = path.join(TEMP_DIR, 'yt_video_' + Date.now() + '.mp4');
+  await runYtDlp([
+    '-f', 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best[height<=720]',
+    '--merge-output-format', 'mp4',
+    '--no-playlist',
+    '--no-warnings',
+    '-o', outPath,
+    url,
+  ]);
+  if (!fs.existsSync(outPath)) throw new Error('yt-dlp output file not found');
+  const title = await getYtTitle(url);
+  return { filePath: outPath, title, quality: '720p' };
 }
 
 async function tiktokDl(url) {
-  const tries = [
-    async () => {
-      const r = await axios.post('https://tikwm.com/api/',
-        new URLSearchParams({ url, count: '12', cursor: '0', web: '1', hd: '1' }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Mozilla/5.0' }, timeout: 30000 });
-      const d = r.data?.data;
-      if (!d) throw new Error('no data');
+  // 1. tikwm.com (best TikTok API — no watermark, HD)
+  try {
+    const r = await axios.post('https://tikwm.com/api/',
+      new URLSearchParams({ url, count: '12', cursor: '0', web: '1', hd: '1' }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Mozilla/5.0' }, timeout: 30000 });
+    const d = r.data?.data;
+    if (d) {
       let v = d.hdplay || d.play;
-      if (!v) throw new Error('no url');
-      if (v.startsWith('/')) v = 'https://tikwm.com' + v;
-      let audio = d.music || v;
-      if (audio.startsWith('/')) audio = 'https://tikwm.com' + audio;
-      return { url: v, audio, title: d.title || '', author: d.author?.nickname || '' };
-    },
-    async () => {
-      const d = await axGet(`https://api.siputzx.my.id/api/d/tiktok?url=${encodeURIComponent(url)}`);
-      const v = d?.data?.mp4 || d?.data?.play || d?.url;
-      if (!v) throw new Error('no url');
-      return { url: v, audio: v, title: d?.data?.title || '', author: '' };
-    },
-    async () => {
-      for (const host of ['https://api.cobalt.tools', 'https://cobalt.oisd.nl']) {
-        try {
-          const d = await axios.post(host + '/', { url, downloadMode: 'auto', videoQuality: '720' },
-            { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 20000 }).then(r => r.data);
-          if (d?.url) return { url: d.url, audio: d.url, title: 'TikTok Video', author: '' };
-        } catch (_) {}
+      if (v) {
+        if (v.startsWith('/')) v = 'https://tikwm.com' + v;
+        return { url: v, title: d.title || 'TikTok Video', author: d.author?.nickname || '' };
       }
-      throw new Error('cobalt all failed');
-    },
-  ];
-  for (const fn of tries) { try { const r = await fn(); if (r) return r; } catch (_) {} }
-  throw new Error('All TikTok methods failed');
+    }
+  } catch (_) {}
+
+  // 2. yt-dlp fallback
+  const outPath = path.join(TEMP_DIR, 'tt_' + Date.now() + '.mp4');
+  await runYtDlp([
+    '-f', 'best[ext=mp4]/best',
+    '--no-playlist', '--no-warnings',
+    '-o', outPath, url,
+  ]);
+  if (!fs.existsSync(outPath)) throw new Error('yt-dlp TikTok output not found');
+  return { filePath: outPath, title: 'TikTok Video', author: '' };
 }
 
 async function igDl(url) {
-  const tries = [
-    async () => {
-      const d = await axGet(`https://api.siputzx.my.id/api/d/igdl?url=${encodeURIComponent(url)}`);
-      const item = d?.data?.[0];
-      const v = item?.url || d?.url;
-      if (!v) throw new Error('no url');
-      return { url: v, type: item?.type === 'image' ? 'image' : 'video' };
-    },
-    async () => {
-      const d = await axGet(`https://api.znx.my.id/api/igdl?url=${encodeURIComponent(url)}`);
-      const v = d?.result?.[0]?.url || d?.url;
-      if (!v) throw new Error('no url');
-      return { url: v, type: 'video' };
-    },
-    async () => {
-      for (const host of ['https://api.cobalt.tools', 'https://cobalt.oisd.nl']) {
-        try {
-          const d = await axios.post(host + '/', { url, downloadMode: 'auto', videoQuality: '720' },
-            { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 20000 }).then(r => r.data);
-          if (d?.url) return { url: d.url, type: 'video' };
-        } catch (_) {}
-      }
-      throw new Error('cobalt all failed');
-    },
-  ];
-  for (const fn of tries) { try { const r = await fn(); if (r) return r; } catch (_) {} }
-  throw new Error('All Instagram methods failed');
+  const outPath = path.join(TEMP_DIR, 'ig_' + Date.now() + '.mp4');
+  await runYtDlp([
+    '-f', 'best[ext=mp4]/best',
+    '--no-playlist', '--no-warnings',
+    '-o', outPath, url,
+  ]);
+  if (!fs.existsSync(outPath)) throw new Error('yt-dlp Instagram output not found');
+  return { filePath: outPath, type: 'video' };
 }
 
 async function fbDl(url) {
-  const tries = [
-    async () => {
-      const d = await axGet(`https://api.siputzx.my.id/api/d/fb?url=${encodeURIComponent(url)}`);
-      const v = d?.data?.hd || d?.data?.sd || d?.url;
-      if (!v) throw new Error('no url');
-      return { url: v };
-    },
-    async () => {
-      const d = await axGet(`https://api.znx.my.id/api/fb?url=${encodeURIComponent(url)}`);
-      const v = d?.result?.hd || d?.result?.sd || d?.url;
-      if (!v) throw new Error('no url');
-      return { url: v };
-    },
-    async () => {
-      for (const host of ['https://api.cobalt.tools', 'https://cobalt.oisd.nl']) {
-        try {
-          const d = await axios.post(host + '/', { url, downloadMode: 'auto', videoQuality: '720' },
-            { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 20000 }).then(r => r.data);
-          if (d?.url) return { url: d.url };
-        } catch (_) {}
-      }
-      throw new Error('cobalt all failed');
-    },
-  ];
-  for (const fn of tries) { try { const r = await fn(); if (r) return r; } catch (_) {} }
-  throw new Error('All Facebook methods failed');
+  const outPath = path.join(TEMP_DIR, 'fb_' + Date.now() + '.mp4');
+  await runYtDlp([
+    '-f', 'best[ext=mp4]/best',
+    '--no-playlist', '--no-warnings',
+    '-o', outPath, url,
+  ]);
+  if (!fs.existsSync(outPath)) throw new Error('yt-dlp Facebook output not found');
+  return { filePath: outPath };
 }
 
 // ── Send media to Telegram ────────────────────────────────────
@@ -422,45 +341,45 @@ async function handleDownload(chatId, url, platform, format) {
       const d   = await ytMp3(url);
       const cap = '🎵 <b>' + (d.title || 'YouTube Audio') + '</b>\n\n📥 <i>FAST-BOT</i>';
       await bot.deleteMessage(chatId, st.message_id).catch(() => {});
-      const r = await sendMedia(chatId, d.url, 'audio', cap);
-      if (!r.ok) await bot.sendMessage(chatId, cap + '\n\n🔗 <a href="' + d.url + '">Download Link</a>', { parse_mode: 'HTML' });
+      await bot.sendAudio(chatId, fs.createReadStream(d.filePath), { caption: cap, parse_mode: 'HTML' });
+      cleanTemp(d.filePath);
 
     } else if (platform === 'youtube') {
       await upd('🎬 <b>Fetching YouTube video...</b>');
       const d   = await ytMp4(url);
       const cap = '🎬 <b>' + (d.title || 'YouTube Video') + '</b>  [' + (d.quality || '720p') + ']\n\n📥 <i>FAST-BOT</i>';
       await bot.deleteMessage(chatId, st.message_id).catch(() => {});
-      const r = await sendMedia(chatId, d.url, 'video', cap);
-      if (!r.ok) await bot.sendMessage(chatId, cap + '\n\n🔗 <a href="' + d.url + '">Download Link</a>', { parse_mode: 'HTML' });
+      await bot.sendVideo(chatId, fs.createReadStream(d.filePath), { caption: cap, parse_mode: 'HTML', supports_streaming: true });
+      cleanTemp(d.filePath);
 
     } else if (platform === 'tiktok') {
       await upd('📱 <b>Fetching TikTok video...</b>');
       const d   = await tiktokDl(url);
       const cap = '📱 <b>' + (d.title || 'TikTok Video') + '</b>' + (d.author ? '\n👤 @' + d.author : '') + '\n\n📥 <i>FAST-BOT</i>';
       await bot.deleteMessage(chatId, st.message_id).catch(() => {});
-      const r = await sendMedia(chatId, d.url, 'video', cap);
-      if (!r.ok) await bot.sendMessage(chatId, cap + '\n\n🔗 <a href="' + d.url + '">Download Link</a>', { parse_mode: 'HTML' });
-
-    } else if (platform === 'instagram') {
-      await upd('📸 <b>Fetching Instagram media...</b>');
-      const d   = await igDl(url);
-      const cap = '📸 <b>Instagram ' + (d.type === 'image' ? 'Photo' : 'Video') + '</b>\n\n📥 <i>FAST-BOT</i>';
-      await bot.deleteMessage(chatId, st.message_id).catch(() => {});
-      if (d.type === 'image') {
-        try { await bot.sendPhoto(chatId, d.url, { caption: cap, parse_mode: 'HTML' }); }
-        catch (_) { await bot.sendMessage(chatId, cap + '\n\n🔗 <a href="' + d.url + '">Download Link</a>', { parse_mode: 'HTML' }); }
+      if (d.filePath) {
+        await bot.sendVideo(chatId, fs.createReadStream(d.filePath), { caption: cap, parse_mode: 'HTML', supports_streaming: true });
+        cleanTemp(d.filePath);
       } else {
         const r = await sendMedia(chatId, d.url, 'video', cap);
         if (!r.ok) await bot.sendMessage(chatId, cap + '\n\n🔗 <a href="' + d.url + '">Download Link</a>', { parse_mode: 'HTML' });
       }
+
+    } else if (platform === 'instagram') {
+      await upd('📸 <b>Fetching Instagram media...</b>');
+      const d   = await igDl(url);
+      const cap = '📸 <b>Instagram Video</b>\n\n📥 <i>FAST-BOT</i>';
+      await bot.deleteMessage(chatId, st.message_id).catch(() => {});
+      await bot.sendVideo(chatId, fs.createReadStream(d.filePath), { caption: cap, parse_mode: 'HTML', supports_streaming: true });
+      cleanTemp(d.filePath);
 
     } else if (platform === 'facebook') {
       await upd('📘 <b>Fetching Facebook video...</b>');
       const d   = await fbDl(url);
       const cap = '📘 <b>Facebook Video</b>\n\n📥 <i>FAST-BOT</i>';
       await bot.deleteMessage(chatId, st.message_id).catch(() => {});
-      const r = await sendMedia(chatId, d.url, 'video', cap);
-      if (!r.ok) await bot.sendMessage(chatId, cap + '\n\n🔗 <a href="' + d.url + '">Download Link</a>', { parse_mode: 'HTML' });
+      await bot.sendVideo(chatId, fs.createReadStream(d.filePath), { caption: cap, parse_mode: 'HTML', supports_streaming: true });
+      cleanTemp(d.filePath);
     }
 
   } catch (e) {
