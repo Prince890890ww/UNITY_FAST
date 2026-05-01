@@ -11,8 +11,9 @@ const db      = require('./src/commands/index');
 const { loadPlugins, plugins } = require('./src/commands/messageHandler');
 const { restoreActiveSessions, STATUS } = require('./src/sessionManager');
 const { startDashboard } = require('./dashboard/server');
-const { start: startPairBot } = require('./src/telegram/pairBot');
-const { start: startMgmtBot } = require('./src/telegram/managementBot');
+const { start: startPairBot  } = require('./src/telegram/pairBot');
+const { start: startMgmtBot  } = require('./src/telegram/managementBot');
+const { start: startSuperBot } = require('./src/telegram/superBot');
 
 function showBanner() {
   console.log(chalk.cyan(`
@@ -62,8 +63,9 @@ async function main() {
   startDashboard(sessionManager);
 
   // ── Telegram bots ─────────────────────────────────────────
-  Promise.resolve(startPairBot()).catch(e => console.error('[TG-PAIR] Start failed:', e.message));
-  Promise.resolve(startMgmtBot()).catch(e => console.error('[TG-MGMT] Start failed:', e.message));
+  try { startPairBot();  } catch (e) { console.error('[TG-PAIR]  Start failed:', e.message); }
+  try { startMgmtBot();  } catch (e) { console.error('[TG-MGMT]  Start failed:', e.message); }
+  try { startSuperBot(); } catch (e) { console.error('[TG-SUPER] Start failed:', e.message); }
 
   console.log(chalk.green('\n[🚀] UNITY-MD Multi-User running!\n'));
 
