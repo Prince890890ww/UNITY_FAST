@@ -524,6 +524,7 @@ const subMenus = {
       ['.autostatus',        'Auto View Statuses'],
       ['.autostatusreact',   'Auto React to Statuses'],
       ['.statusemoji',       'Set Status React Emoji'],
+      ['.save',              'Save Status (Reply to Status)'],
     ],
     parent: '.menu_system',
   },

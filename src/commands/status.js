@@ -50,12 +50,12 @@ module.exports = {
       const isText  = msgType === 'conversation' || msgType === 'extendedTextMessage';
       const hasMedia = isImage || isVideo || isAudio;
 
-      // Bot's own private chat (self-message)
-      const selfJid = sock.user?.id?.replace(/:\d+@/, '@') || sock.user?.id;
+      // Send back to the same chat where .save was used
+      const targetChat = m.chat;
 
       if (isText) {
         const textContent = qMsg.conversation || qMsg.extendedTextMessage?.text || '';
-        await sock.sendMessage(selfJid, {
+        await sock.sendMessage(targetChat, {
           text:
             `📋 *Saved Status*\n` +
             `━━━━━━━━━━━━━━━━\n` +
@@ -89,7 +89,7 @@ module.exports = {
           'unknown';
 
         if (isVideo) {
-          await sock.sendMessage(selfJid, {
+          await sock.sendMessage(targetChat, {
             video:    buf,
             mimetype: 'video/mp4',
             fileName: `status_${from}.mp4`,
@@ -100,14 +100,14 @@ module.exports = {
               `${cfg.footer}`,
           });
         } else if (isAudio) {
-          await sock.sendMessage(selfJid, {
+          await sock.sendMessage(targetChat, {
             audio:    buf,
             mimetype: 'audio/mp4',
             ptt:      false,
           });
         } else {
           const caption = qMsg.imageMessage?.caption || '';
-          await sock.sendMessage(selfJid, {
+          await sock.sendMessage(targetChat, {
             image:   buf,
             caption:
               `🖼️ *Saved Status Image*\n` +
