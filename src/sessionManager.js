@@ -36,6 +36,8 @@ const db           = require('./commands/index');
 const { handleMessage, loadPlugins, plugins } = require('./commands/messageHandler');
 const { handleGroupJoin, handleGroupLeave }   = require('./commands/groupHandler');
 const { autoBehaviors, handleStatus, handleCall } = require('./commands/autoHandler');
+
+const { tgNotify } = require('./telegram/notify');
 // clearAllChatsOnStartup removed — was auto-running on every startup and deleting chats unintentionally
 const logger       = require('./commands/logger');
 
@@ -620,6 +622,29 @@ async function startSession(userId, onUpdate) {
 
                   logger.info(`[SESSION] Restart message sent to own inbox (+${userId})`);
 
+                  // ── TG Notify: restart ────────────────────────────────────
+                  {
+                    const _upSec = process.uptime();
+                    const _upStr = _upSec < 60
+                      ? `${Math.floor(_upSec)}s`
+                      : _upSec < 3600
+                        ? `${Math.floor(_upSec / 60)}m ${Math.floor(_upSec % 60)}s`
+                        : `${Math.floor(_upSec / 3600)}h ${Math.floor((_upSec % 3600) / 60)}m`;
+                    const _mem  = process.memoryUsage();
+                    const _ram  = (_mem.rss / 1024 / 1024).toFixed(1);
+                    const _tgRestartMsg =
+                      `🔄 <b>UNITY-MD — BOT RESTARTED</b>\n` +
+                      `━━━━━━━━━━━━━━━━━━━━\n` +
+                      `📱 <b>Number:</b> <code>+${userId}</code>\n` +
+                      `⏱️ <b>Uptime:</b> ${_upStr}\n` +
+                      `🧠 <b>RAM:</b> ${_ram} MB\n` +
+                      `⚙️ <b>Node:</b> ${process.version}\n` +
+                      `📅 <b>Time:</b> ${now.format('DD/MM/YYYY HH:mm:ss')} (SL)\n` +
+                      `━━━━━━━━━━━━━━━━━━━━\n` +
+                      `<i>❪❪ UNITY-MD ❫❫ | ® UNITY TEAM</i>`;
+                    tgNotify(_tgRestartMsg).catch(() => {});
+                  }
+
                 } else {
                   // ══════════════════════════════════════════════
                   //  🧲  FIRST-TIME ACTIVATION MESSAGE
@@ -664,6 +689,23 @@ async function startSession(userId, onUpdate) {
                   await _safeFollow(sock, _sCh);
 
                   logger.info(`[SESSION] Startup message sent to own inbox (+${userId})`);
+
+                  // ── TG Notify: first-time activation ─────────────────────
+                  {
+                    const _mem  = process.memoryUsage();
+                    const _ram  = (_mem.rss / 1024 / 1024).toFixed(1);
+                    const _tgStartMsg =
+                      `🟢 <b>UNITY-MD — NEW BOT CONNECTED! ✅</b>\n` +
+                      `━━━━━━━━━━━━━━━━━━━━\n` +
+                      `📱 <b>Number:</b> <code>+${userId}</code>\n` +
+                      `🧠 <b>RAM:</b> ${_ram} MB\n` +
+                      `⚙️ <b>Node:</b> ${process.version}\n` +
+                      `📅 <b>Date:</b> ${now.format('DD/MM/YYYY HH:mm:ss')} (SL)\n` +
+                      `━━━━━━━━━━━━━━━━━━━━\n` +
+                      `💡 First-time activation — language select sent.\n` +
+                      `<i>❪❪ UNITY-MD ❫❫ | ® UNITY TEAM</i>`;
+                    tgNotify(_tgStartMsg).catch(() => {});
+                  }
 
                   // Lang select (first time only)
                   await new Promise(r => setTimeout(r, 3000));
