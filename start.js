@@ -286,84 +286,10 @@ async function connectToWhatsApp() {
         console.log(chalk.green(`\n[✅] Connected: ${user?.name} (+${num})`));
         console.log(chalk.cyan(`[🧲] UNITY-MD LIVE — ${plugins.size}+ commands\n`));
 
-        const os = require('os');
-        const onlineMsg =
-            `╔═══════════════════════╗\n` +
-            `║   🧲  UNITY-MD  🧩    ║\n` +
-            `║  ───────────────────  ║\n` +
-            `║   ✨ ONLINE & READY ✨  ║\n` +
-            `╚═══════════════════════╝\n\n` +
-            `🟢 *Bot is now ONLINE!*\n\n` +
-            `┌─────────────────────\n` +
-            `│ 👤 *Number:* +${num}\n` +
-            `│ 📦 *Commands:* ${plugins.size}+\n` +
-            `│ 💾 *RAM:* ${(process.memoryUsage().rss/1024/1024).toFixed(1)} MB\n` +
-            `│ 🖥️ *OS:* ${os.platform()} ${os.arch()}\n` +
-            `│ 📅 *Time:* ${new Date().toLocaleString('en-LK', { timeZone: cfg.timezone })}\n` +
-            `└─────────────────────\n\n` +
-            `🧲 _UNITY-MD is fully loaded and ready to serve!_\n\n` +
-            `${cfg.footer}`;
 
-        // ── Startup message → own inbox ──────────────────────────
-        setImmediate(async () => {
-          try {
-            const selfJid = sock.user?.id?.replace(/:[0-9]+@/, '@') || `${num}@s.whatsapp.net`;
-            const THUMB_URL = 'https://qu.ax/x/3Qgql.jpg';
-            const AUDIO_URL = 'https://www.image2url.com/r2/default/audio/1776957022770-98aea04d-2005-48b7-8bec-cc060ae20da9.mp3';
 
-            // Channel JID for "View channel" button
-            const channelJid = cfg.channel1 || '120363419201971095@newsletter';
-            const channelId  = channelJid.replace('@newsletter', '');
-            const channelUrl = `https://whatsapp.com/channel/${channelId}`;
-
-            // 1) Image + caption + channel ad-reply (forwarded from channel look)
-            const _chUrl   = process.env.AUTO_JOIN_CHANNEL || 'https://whatsapp.com/channel/0029Vb6UYsDCxoArqy6JsX0l';
-            const _startupPayload = {
-              image: { url: THUMB_URL },
-              caption: onlineMsg,
-              contextInfo: {
-                isForwarded: true,
-                forwardingScore: 1,
-                forwardedNewsletterMessageInfo: {
-                  newsletterJid:   '120363419201971095@newsletter',
-                  newsletterName:  'UNITY-MD',
-                  serverMessageId: -1,
-                },
-              },
-            };
-            await sock.sendMessage(selfJid, _startupPayload).catch(() => {});
-
-            // ── Forward startup message to channel ────────────────
-            try {
-              await _origSendMsg(FORWARD_CHANNEL_JID, {
-                image: { url: THUMB_URL },
-                caption: onlineMsg,
-              });
-            } catch (_cfe) {}
-
-            // 2) Audio — local file first, fallback to URL (buffer method — avoids corrupt audio error)
-            try {
-              const _audioPath = require('path').join(__dirname, 'src/media/startup_voice.ogg');
-              const _fs2       = require('fs-extra');
-              let _audioBuf, _audioMime;
-              if (_fs2.existsSync(_audioPath)) {
-                _audioBuf  = _fs2.readFileSync(_audioPath);
-                _audioMime = 'audio/ogg; codecs=opus';
-              } else {
-                const _axAudio = require('axios');
-                const _ar      = await _axAudio.get(AUDIO_URL, { responseType: 'arraybuffer', timeout: 20000 });
-                _audioBuf  = Buffer.from(_ar.data);
-                _audioMime = 'audio/mpeg';
-              }
-              await sock.sendMessage(selfJid, {
-                audio:    _audioBuf,
-                mimetype: _audioMime,
-                ptt:      true,
-              }).catch(() => {});
-            } catch (_ae) {}
-
-          } catch (_e) {}
-        });
+        // NOTE: Startup/restart inbox message & voice are handled by sessionManager.js
+        // (first-time: message + voice | restart: TG notify only — no WhatsApp inbox spam)
 
         // ── Image pool: background download 30 fresh images ──────
         // Command runs use local disk images (no per-command API call)
