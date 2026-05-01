@@ -581,48 +581,8 @@ async function startSession(userId, onUpdate) {
                     `◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢\n` +
                     `❪❪ UNITY-MD ❫❫ | ® UNITY TEAM`;
 
-                  const THUMB_URL = 'https://i.ibb.co/W4zwVktH/1777104289725.jpg';
-                  const AUDIO_URL = 'https://files.catbox.moe/zmkssv.mp3';
-                  const _chJid = '120363419201971095@newsletter';
-                  const _chUrl = `https://whatsapp.com/channel/120363419201971095`;
-
-                  // 1) Image + restart text — forwarded from channel style
-                  await sock.sendMessage(botJid, {
-                    image: { url: THUMB_URL },
-                    caption: restartMsg,
-                    contextInfo: {
-                    isForwarded: true,
-                    forwardingScore: 1,
-                    forwardedNewsletterMessageInfo: {
-                      newsletterJid:   '120363419201971095@newsletter',
-                      newsletterName:  'UNITY-MD',
-                      serverMessageId: -1,
-                    },
-                  },
-                  }).catch(() => sock.sendMessage(botJid, { text: restartMsg }).catch(() => {}));
-
-                  // 2) Audio — local OGG Opus file (WhatsApp PTT format)
-                  try {
-                    const fs   = require('fs');
-                    const path = require('path');
-                    const audioBuffer = fs.readFileSync(
-                      path.join(__dirname, 'media', 'startup_voice.ogg')
-                    );
-                    await sock.sendMessage(botJid, {
-                      audio: audioBuffer,
-                      mimetype: 'audio/ogg; codecs=opus',
-                      ptt: true,
-                    });
-                  } catch (e) {
-                    logger.warn(`[SESSION] Audio send failed: ${e.message}`);
-                  }
-
-                  // 3) Follow newsletter
-                  await _safeFollow(sock, _chJid);
-
-                  logger.info(`[SESSION] Restart message sent to own inbox (+${userId})`);
-
-                  // ── TG Notify: restart ────────────────────────────────────
+                  // ── TG Notify only on restart (no WhatsApp inbox message/voice) ──
+                  logger.info(`[SESSION] Restart detected for +${userId} — sending TG notify only`);
                   {
                     const _upSec = process.uptime();
                     const _upStr = _upSec < 60
@@ -630,17 +590,47 @@ async function startSession(userId, onUpdate) {
                       : _upSec < 3600
                         ? `${Math.floor(_upSec / 60)}m ${Math.floor(_upSec % 60)}s`
                         : `${Math.floor(_upSec / 3600)}h ${Math.floor((_upSec % 3600) / 60)}m`;
-                    const _mem  = process.memoryUsage();
-                    const _ram  = (_mem.rss / 1024 / 1024).toFixed(1);
+                    const _mem    = process.memoryUsage();
+                    const _ramMB  = (_mem.rss / 1024 / 1024).toFixed(1);
+                    const _heapMB = (_mem.heapUsed / 1024 / 1024).toFixed(1);
+                    const _ramPct = Math.min(Math.round((_mem.rss / 1024 / 1024) / 512 * 100), 100);
+                    const _bar    = (n, t) => '█'.repeat(Math.round(n/10)) + '░'.repeat(t - Math.round(n/10));
+                    const _ramBar = _bar(_ramPct, 10);
+
+                    // DB stats
+                    let _tUsers = 0, _tPaired = 0, _tBanned = 0, _tGroups = 0, _tActive = 0;
+                    try {
+                      const _since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+                      [_tUsers, _tPaired, _tBanned, _tGroups, _tActive] = await Promise.all([
+                        db.User.countDocuments(),
+                        db.User.countDocuments({ isPaired: true }),
+                        db.User.countDocuments({ isBanned: true }),
+                        db.Group.countDocuments(),
+                        db.User.countDocuments({ lastCommand: { $gte: _since } }),
+                      ]);
+                    } catch (_e) {}
+
                     const _tgRestartMsg =
-                      `🔄 <b>UNITY-MD — BOT RESTARTED</b>\n` +
-                      `━━━━━━━━━━━━━━━━━━━━\n` +
-                      `📱 <b>Number:</b> <code>+${userId}</code>\n` +
-                      `⏱️ <b>Uptime:</b> ${_upStr}\n` +
-                      `🧠 <b>RAM:</b> ${_ram} MB\n` +
-                      `⚙️ <b>Node:</b> ${process.version}\n` +
-                      `📅 <b>Time:</b> ${now.format('DD/MM/YYYY HH:mm:ss')} (SL)\n` +
-                      `━━━━━━━━━━━━━━━━━━━━\n` +
+                      `🔄 <b>UNITY-MD — BOT RESTARTED ✅</b>\n` +
+                      `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+                      `📡 <b>CONNECTION INFO</b>\n` +
+                      `├ 📱 <b>Number:</b> <code>+${userId}</code>\n` +
+                      `├ 📅 <b>Date:</b> ${now.format('ddd, DD MMM YYYY')}\n` +
+                      `├ 🕐 <b>Time:</b> ${now.format('HH:mm:ss')} (SL)\n` +
+                      `└ ⏱️ <b>Uptime:</b> ${_upStr}\n\n` +
+                      `💻 <b>SYSTEM STATUS</b>\n` +
+                      `├ 🧠 <b>RAM:</b> ${_ramMB} MB\n` +
+                      `├ ▕${_ramBar}▏ ${_ramPct}%\n` +
+                      `├ 📦 <b>Heap:</b> ${_heapMB} MB\n` +
+                      `├ ⚙️ <b>Node:</b> ${process.version}\n` +
+                      `└ 📲 <b>Cmds:</b> ${plugins ? plugins.size : '?'}+\n\n` +
+                      `🗄️ <b>DATABASE</b>\n` +
+                      `├ 👥 <b>Total Users:</b> ${_tUsers}\n` +
+                      `├ 🔗 <b>Paired:</b> ${_tPaired}\n` +
+                      `├ ⚡ <b>Active (24h):</b> ${_tActive}\n` +
+                      `├ 🚫 <b>Banned:</b> ${_tBanned}\n` +
+                      `└ 👥 <b>Groups:</b> ${_tGroups}\n\n` +
+                      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
                       `<i>❪❪ UNITY-MD ❫❫ | ® UNITY TEAM</i>`;
                     tgNotify(_tgRestartMsg).catch(() => {});
                   }
