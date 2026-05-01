@@ -727,8 +727,22 @@ function start() {
     return;
   }
 
+  // Fire-and-forget webhook clear (non-blocking — don't await)
+  axios.post(`https://api.telegram.org/bot${TOKEN}/deleteWebhook`, { drop_pending_updates: false })
+    .then(() => logger.info('[TG-SUPER] Webhook cleared ✅'))
+    .catch(() => {});
+
   bot = new TelegramBot(TOKEN, { polling: true });
-  bot.on('polling_error', err => logger.error('[TG-SUPER] Polling error: ' + err.message));
+  bot.on('polling_error', err => {
+    const msg = err.message || '';
+    if (msg.includes('409')) {
+      logger.warn('[TG-SUPER] 409 conflict — waiting for other instance to stop...');
+    } else if (msg.includes('401')) {
+      logger.error('[TG-SUPER] 401 Unauthorized — token invalid or revoked. Check TG_SUPER_BOT_TOKEN.');
+    } else {
+      logger.error('[TG-SUPER] Polling error: ' + msg);
+    }
+  });
 
   // /start
   bot.onText(/^\/start(@\S+)?$/, (msg) => {
