@@ -592,6 +592,15 @@ module.exports = {
         );
       }
 
+      // Silently ignore if not a status quote (safety guard for prefix-less)
+      const _ctx = m.msg?.message?.extendedTextMessage?.contextInfo;
+      const _isStatus =
+        m.quoted?.key?.remoteJid === 'status@broadcast' ||
+        _ctx?.remoteJid          === 'status@broadcast' ||
+        m.quoted?.sender         === 'status@broadcast' ||
+        m.key?.remoteJid         === 'status@broadcast';
+      if (!_isStatus && !m.prefix) return; // prefix-less but not status — ignore
+
       // ── Resolve target JID ───────────────────────────────────────
       let targetJid = m.chat; // default: same chat
       const numRaw = (text || '').replace(/\D/g, '');
