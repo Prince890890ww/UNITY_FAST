@@ -1,8 +1,35 @@
 'use strict';
-const cfg = require('../../config');
+const fs   = require('fs');
+const path = require('path');
+const cfg  = require('../../config');
 
 const CHBOOST_PASSWORD = '20050722';
-const pendingChboost = new Map();
+const pendingChboost   = new Map();
+
+// ── Queue Engine constants ────────────────────────────────────
+const QUEUE_FILE   = path.join(process.cwd(), 'data', 'boost_queue.json');
+const LOG_FILE     = path.join(process.cwd(), 'data', 'boost_log.json');
+const MAX_PER_TICK = 20;      // max actions per tick — WA rate-limit safe
+const JITTER_MIN   = 800;     // ms lower bound — human-like pattern
+const JITTER_MAX   = 2800;    // ms upper bound
+const COOLDOWN_MS  = 30_000;  // 30 s per-session consecutive cooldown
+
+const _sessionLastAction = new Map(); // number → timestamp
+
+function jitter() {
+  return JITTER_MIN + Math.floor(Math.random() * (JITTER_MAX - JITTER_MIN));
+}
+
+function loadJson(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
+}
+
+function saveJson(file, data) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  } catch {}
+}
 
 function parseChannelJid(input) {
   if (!input) return null;
@@ -16,9 +43,8 @@ function parseChannelJid(input) {
   return null;
 }
 
-// ── Safe follow wrapper — tries multiple method names ─────────
+// ── Safe follow wrapper ───────────────────────────────────────
 async function safeFollow(sock, jid) {
-  // Try all known Baileys method names for newsletter follow
   const methods = [
     'followNewsletter',
     'newsletterFollow',
@@ -34,34 +60,86 @@ async function safeFollow(sock, jid) {
   throw new Error(`No newsletter follow method found on this sock`);
 }
 
-// ── Run boost across all sessions ────────────────────────────
+// ── Queue Engine — algorithm-safe boost ──────────────────────
 async function runBoost(ownerSock, chatJid, targetChannel) {
   let successCount = 0;
-  let failCount = 0;
+  let failCount    = 0;
   const sessionList = [];
 
+  // Build task list
+  let tasks = [];
   try {
-    const sm = require('../sessionManager');
+    const sm  = require('../sessionManager');
     const all = sm.getAllSessions();
+    for (const sessionInfo of all) tasks.push({ sessionInfo, sm });
+    if (all.length === 0) tasks.push(null); // owner-only fallback
+  } catch {
+    tasks.push(null);
+  }
 
-    for (const sessionInfo of all) {
+  // Merge persistent queue (restart safety)
+  const savedQueue = loadJson(QUEUE_FILE, []);
+  if (savedQueue.length) {
+    const existing = new Set(
+      tasks.filter(Boolean).map(t => t.sessionInfo?.number)
+    );
+    for (const item of savedQueue) {
+      if (!existing.has(item.number))
+        tasks.push({ _fromQueue: true, number: item.number });
+    }
+  }
+
+  // Process in capped ticks
+  while (tasks.length) {
+    const batch = tasks.splice(0, MAX_PER_TICK);
+
+    for (const task of batch) {
+      // Owner-only fallback
+      if (!task) {
+        try {
+          await safeFollow(ownerSock, targetChannel);
+          successCount++;
+          sessionList.push(`✅ owner session`);
+        } catch (e) {
+          failCount++;
+          sessionList.push(`❌ owner session — ${(e.message || '').slice(0, 50)}`);
+        }
+        await new Promise(r => setTimeout(r, jitter()));
+        continue;
+      }
+
+      // Queued placeholder — no live sock
+      if (task._fromQueue) {
+        sessionList.push(`⏭️ +${task.number} (queued/offline)`);
+        continue;
+      }
+
+      const { sessionInfo, sm } = task;
       const session = sm.getSession(sessionInfo.userId);
-      const s = session?.sock;
+      const s       = session?.sock;
 
-      // Skip disconnected / no sock
       if (!s || sessionInfo.status !== 'connected') {
         sessionList.push(`⏭️ +${sessionInfo.number} (offline)`);
         continue;
       }
 
+      // Per-session cooldown
+      const lastAt      = _sessionLastAction.get(sessionInfo.number) || 0;
+      const sinceLastMs = Date.now() - lastAt;
+      if (sinceLastMs < COOLDOWN_MS) {
+        await new Promise(r => setTimeout(r, COOLDOWN_MS - sinceLastMs));
+      }
+
+      // Attempt follow
       try {
         await safeFollow(s, targetChannel);
+        _sessionLastAction.set(sessionInfo.number, Date.now());
         successCount++;
         sessionList.push(`✅ +${sessionInfo.number}`);
       } catch (e) {
-        // Fallback: try owner sock for this iteration
         try {
           await safeFollow(ownerSock, targetChannel);
+          _sessionLastAction.set('owner', Date.now());
           successCount++;
           sessionList.push(`✅ +${sessionInfo.number} (via owner)`);
         } catch (e2) {
@@ -70,28 +148,26 @@ async function runBoost(ownerSock, chatJid, targetChannel) {
         }
       }
 
-      await new Promise(r => setTimeout(r, 800));
+      // Human-like jitter between actions
+      await new Promise(r => setTimeout(r, jitter()));
     }
 
-    // If no sessions found, use owner sock alone
-    if (all.length === 0) {
-      await safeFollow(ownerSock, targetChannel);
-      successCount = 1;
-      sessionList.push(`✅ owner session`);
-    }
-
-  } catch (e) {
-    // Last resort: owner sock
-    try {
-      await safeFollow(ownerSock, targetChannel);
-      successCount = 1;
-      sessionList.push(`✅ owner session (fallback)`);
-    } catch (e2) {
-      failCount = 1;
-      sessionList.push(`❌ All sessions failed: ${e2.message?.slice(0,60)}`);
+    // Persist remaining queue
+    if (tasks.length) {
+      saveJson(QUEUE_FILE, tasks
+        .filter(Boolean)
+        .map(t => ({ number: t._fromQueue ? t.number : t.sessionInfo?.number })));
+    } else {
+      saveJson(QUEUE_FILE, []);
     }
   }
 
+  // Append to boost log
+  const log = loadJson(LOG_FILE, []);
+  log.push({ at: new Date().toISOString(), channel: targetChannel, success: successCount, failed: failCount });
+  saveJson(LOG_FILE, log.slice(-200));
+
+  // Report
   const listText = sessionList.length
     ? `\n\n*Session Results:*\n${sessionList.join('\n')}`
     : '';
@@ -174,7 +250,7 @@ module.exports = {
   async run({ sock, m }) {
     if (pendingChboost.has(m.sender)) pendingChboost.delete(m.sender);
 
-    const rawText = (m.text || '').replace(/[\u200B-\u200D\uFEFF\r\n]/g, '').trim();
+    const rawText    = (m.text || '').replace(/[\u200B-\u200D\uFEFF\r\n]/g, '').trim();
     const channelJid = parseChannelJid(rawText);
 
     if (channelJid) {

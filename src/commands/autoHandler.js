@@ -6,6 +6,10 @@ const fs   = require('fs');
 const path = require('path');
 const { t, getLang } = require('./strings');
 
+// Per-chat presence throttle — max 1 presence update per chat per 8s
+const _presenceLastSent = new Map();
+const PRESENCE_THROTTLE = 8_000;
+
 let sock = null;
 
 const dataDir = path.join(process.cwd(), 'data');
@@ -26,7 +30,7 @@ async function getSessionFeatures(sessionOwner) {
         autoOnline:      dbF.autoOnline      ?? jsonF.autoOnline      ?? false,
         autoRead:        dbF.autoRead        ?? jsonF.autoRead        ?? false,
         autoTyping:      dbF.autoTyping      ?? jsonF.autoTyping      ?? false,
-        autoBio:         dbF.autoBio         ?? jsonF.autoBio         ?? false,
+        autoBio:         dbF.autoBio         ?? jsonF.autoBio         ?? true,
         antiCall:          dbF.antiCall          ?? jsonF.antiCall          ?? false,
         didYouMean:        dbF.didYouMean        ?? jsonF.didYouMean        ?? false,
         autoReact:         dbF.autoReact         ?? jsonF.autoReact         ?? false,
@@ -66,7 +70,7 @@ async function getFeatures(sessionId) {
       autoRead:          readState('autoread.json',          { enabled: base.autoRead          ?? false }, sessionId).enabled,
       autoRecording:     readState('autoRecording.json',     { enabled: base.autoRecording     ?? false }, sessionId).enabled,
       autoOnline:        readState('autoOnline.json',        { enabled: base.autoOnline        ?? false }, sessionId).enabled,
-      autoBio:           readState('autoBio.json',           { enabled: base.autoBio           ?? false }, sessionId).enabled,
+      autoBio:           readState('autoBio.json',           { enabled: base.autoBio          ?? true  }, sessionId).enabled,
       antiCall:          readState('anticall.json',          { enabled: base.antiCall          ?? false }, sessionId).enabled,
       // Unity auto features
       autoReact:         readState('autoReact.json',         { enabled: false }, sessionId).enabled,
@@ -150,20 +154,29 @@ async function reFollowChannels() {
 // ── Cron jobs ─────────────────────────────────────────────────
 function setupCronJobs() {
 
-  // Auto bio update every 30 minutes
-  cron.schedule('*/30 * * * *', async () => {
-    const f0 = await getFeatures();
-    if (!sock || !f0?.autoBio) return;
-    try {
-      const moment = require('moment-timezone');
-      const now = moment().tz(cfg.timezone);
-      const bio =
-        `🧲 UNITY-MD | ` +
-        `${now.format('ddd DD MMM')} | ` +
-        `${now.format('HH:mm')} | ® UNITY TEAM`;
-      await sock.updateProfileStatus(bio);
-    } catch (e) {}
-  });
+  // Auto bio update — randomized 25–45 min interval (avoids fixed bot fingerprint)
+  const _scheduleBio = () => {
+    const delayMs = (25 + Math.floor(Math.random() * 20)) * 60 * 1000;
+    setTimeout(async () => {
+      const f0 = await getFeatures();
+      if (sock && f0?.autoBio) {
+        try {
+          const u   = process.uptime();
+          const d   = Math.floor(u / 86400);
+          const h   = Math.floor((u % 86400) / 3600);
+          const min = Math.floor((u % 3600) / 60);
+          const runtime =
+            d > 0 ? `${d}d ${h}h ${min}m` :
+            h > 0 ? `${h}h ${min}m` :
+                    `${min}m`;
+          const bio = `UNITY-MD | Runtime: ${runtime} | © TEAM UNITY`;
+          await sock.updateProfileStatus(bio);
+        } catch {}
+      }
+      _scheduleBio(); // reschedule with new random delay
+    }, delayMs);
+  };
+  _scheduleBio();
 
   // Daily report to owner at 9AM
   cron.schedule('0 9 * * *', async () => {
@@ -282,30 +295,33 @@ async function autoBehaviors(socket, msg) {
   const f = await getSessionFeatures(socket.sessionOwner);
 
   // ── Auto presence (typing/recording before reply) ─────────
-  // Only touch presence if a feature actually needs it.
-  // If autoOnline is OFF and no auto-presence/recording, send NO presence
-  // update at all — proactively sending 'unavailable' still causes a brief
-  // "online" flash on WhatsApp because the server acks the socket activity.
+  // After showing typing/recording, revert to unavailable if autoOnline is OFF
   const afterPresence = f?.autoOnline ? 'available' : 'unavailable';
 
-  if (f?.autoPresence) {
+  // Throttle: only send presence if 8s passed since last update for this chat
+  const _now          = Date.now();
+  const _lastPresence = _presenceLastSent.get(jid) || 0;
+  const _presenceOk   = (_now - _lastPresence) >= PRESENCE_THROTTLE;
+
+  if (_presenceOk && f?.autoPresence) {
     const ptype = f.autoPresenceType || 'composing';
     socket.sendPresenceUpdate(ptype, jid).catch(() => {});
+    _presenceLastSent.set(jid, _now);
     setTimeout(() => socket.sendPresenceUpdate(afterPresence, jid).catch(() => {}), 3000);
   }
 
-  if (f?.autoRecording) {
+  if (_presenceOk && f?.autoRecording) {
     socket.sendPresenceUpdate('recording', jid).catch(() => {});
+    _presenceLastSent.set(jid, _now);
     setTimeout(() => socket.sendPresenceUpdate(afterPresence, jid).catch(() => {}), 2000);
   }
 
   if (f?.autoOnline) {
-    // Explicit online mode — keep broadcasting available
     socket.sendPresenceUpdate('available').catch(() => {});
+  } else {
+    // Actively push unavailable so WhatsApp hides our online status
+    socket.sendPresenceUpdate('unavailable').catch(() => {});
   }
-  // ⚠️ Removed: the old `else { sendPresenceUpdate('unavailable') }` block.
-  // Sending unavailable on every message paradoxically triggers a brief
-  // "online" flash. True offline = simply never sending 'available'.
 
   if (f?.autoRead) {
     socket.readMessages([msg.key]).catch(() => {});
@@ -549,8 +565,7 @@ async function handleStatus(socket, msg) {
     _recentStatuses.set(owner, arr.slice(0, 30)); // keep last 30
 
     // ── Auto Status View (autoRead OR autoStatusView) ─────────────
-    const needsView = f?.autoRead || f?.autoStatusView || f?.autoStatusReact;
-    if (needsView) {
+    if (f?.autoRead || f?.autoStatusView) {
       // Method 1 (v7 primary): sendReceipt — most reliable in Baileys v7
       let viewed = false;
       try {
@@ -581,32 +596,16 @@ async function handleStatus(socket, msg) {
           await socket.readMessages([msg.key]);
         } catch (_e3) {}
       }
-
-      // Small delay — give WA server time to register the read before react
-      if (f?.autoStatusReact) await new Promise(r => setTimeout(r, 1500));
     }
 
     // ── Auto Status React (autoStatusReact) ───────────────────────
-    // WhatsApp requires the status to be marked as read before a react
-    // is accepted. The view block above guarantees that when react is on.
     if (f?.autoStatusReact) {
       const emoji = f.autoStatusReactEmoji || '❤️';
-      let reacted = false;
       try {
         await socket.sendMessage('status@broadcast', {
           react: { text: emoji, key: msg.key },
         }, { statusJidList: [msg.key.participant || msg.key.remoteJid] });
-        reacted = true;
-      } catch (_re1) {}
-
-      // Fallback: react directly to sender jid
-      if (!reacted) {
-        try {
-          await socket.sendMessage(msg.key.remoteJid, {
-            react: { text: emoji, key: msg.key },
-          });
-        } catch (_re2) {}
-      }
+      } catch (_re) {}
     }
 
   } catch {}

@@ -17,8 +17,6 @@ module.exports = {
     // ── New status commands (2026 new methods) ──
     'savestatus', 'dlstatus', 'statusemoji',
     'autostatus', 'autostatusreact',
-    // ── Status reply save ──
-    'save',
   ],
 
   async run({ sock, m }) {
@@ -26,107 +24,6 @@ module.exports = {
     const cmd = m.command;
     const text = m.text?.trim();
     const chat = m.chat;
-
-    // ══════════════════════════════════════════════════════════════
-    // ── .save — Reply to a status → forward media to own chat ────
-    // ══════════════════════════════════════════════════════════════
-    if (cmd === 'save') {
-      const quotedMsg = m.quoted;
-      if (!quotedMsg) {
-        return m.reply(
-          `📌 *Usage:* Reply to a status message with *.save*\n\n` +
-          `Bot will forward that status to your own chat.\n\n` +
-          `${cfg.footer}`
-        );
-      }
-
-      const qMsg    = quotedMsg.message || {};
-      const msgType = Object.keys(qMsg)[0] || '';
-      const isImage = msgType === 'imageMessage';
-      const isVideo = msgType === 'videoMessage';
-      const isAudio = msgType === 'audioMessage';
-      const isText  = msgType === 'conversation' || msgType === 'extendedTextMessage';
-      const hasMedia = isImage || isVideo || isAudio;
-
-      // Send back to the same chat where .save was used
-      const targetChat = m.chat;
-
-      if (isText) {
-        const textContent = qMsg.conversation || qMsg.extendedTextMessage?.text || '';
-        await sock.sendMessage(targetChat, {
-          text:
-            `📋 *Saved Status*\n` +
-            `━━━━━━━━━━━━━━━━\n` +
-            `💬 ${textContent}\n\n` +
-            `${cfg.footer}`,
-        });
-        await m.react('✅');
-        return m.reply(`✅ *Text status saved to your chat!*\n\n${cfg.footer}`);
-      }
-
-      if (!hasMedia) {
-        return m.reply(
-          `⚠️ *Could not detect media in this status.*\n\n` +
-          `Supported: image, video, audio, text\n\n` +
-          `${cfg.footer}`
-        );
-      }
-
-      await m.react('⬇️');
-      try {
-        const buf = await sock.downloadMediaMessage({
-          message: quotedMsg.message,
-          key:     quotedMsg.key,
-        });
-
-        if (!buf || !buf.length) throw new Error('Empty media buffer');
-
-        const from =
-          quotedMsg.key?.participant?.split('@')[0] ||
-          quotedMsg.key?.remoteJid?.split('@')[0] ||
-          'unknown';
-
-        if (isVideo) {
-          await sock.sendMessage(targetChat, {
-            video:    buf,
-            mimetype: 'video/mp4',
-            fileName: `status_${from}.mp4`,
-            caption:
-              `🎬 *Saved Status Video*\n` +
-              `👤 From: +${from}\n` +
-              `⏰ ${new Date().toLocaleString('en-LK')}\n\n` +
-              `${cfg.footer}`,
-          });
-        } else if (isAudio) {
-          await sock.sendMessage(targetChat, {
-            audio:    buf,
-            mimetype: 'audio/mp4',
-            ptt:      false,
-          });
-        } else {
-          const caption = qMsg.imageMessage?.caption || '';
-          await sock.sendMessage(targetChat, {
-            image:   buf,
-            caption:
-              `🖼️ *Saved Status Image*\n` +
-              `👤 From: +${from}\n` +
-              `⏰ ${new Date().toLocaleString('en-LK')}\n` +
-              (caption ? `💬 ${caption}\n` : '') +
-              `\n${cfg.footer}`,
-          });
-        }
-
-        await m.react('✅');
-        return m.reply(`✅ *Status saved to your chat!*\n\n${cfg.footer}`);
-      } catch (e) {
-        await m.react('❌');
-        return m.reply(
-          `❌ *Failed to save status.*\n` +
-          `Error: ${e.message}\n\n` +
-          `${cfg.footer}`
-        );
-      }
-    }
 
     // ══════════════════════════════════════════════════════════════
     // ── NEW: Auto Status View toggle ─────────────────────────────
@@ -437,9 +334,17 @@ module.exports = {
 
       await m.reply(`📢 *Broadcasting...*`);
       const groups = await sock.groupFetchAllParticipating();
-      let sent = 0, failed = 0;
+      const entries = Object.entries(groups);
 
-      for (const [jid] of Object.entries(groups)) {
+      // Safety cap — more than 50 groups at once is a spam signal
+      const MAX_BC = 50;
+      if (entries.length > MAX_BC) {
+        await m.reply(`⚠️ *Too many groups (${entries.length}). Capped at ${MAX_BC} to avoid ban.*\n\n${cfg.footer}`);
+      }
+      const targets = entries.slice(0, MAX_BC);
+
+      let sent = 0, failed = 0;
+      for (const [jid] of targets) {
         try {
           await sock.sendMessage(jid, {
             text:
@@ -451,7 +356,8 @@ module.exports = {
         } catch (e) {
           failed++;
         }
-        await new Promise(r => setTimeout(r, 3000 + Math.floor(Math.random() * 2000)));
+        // Human-like jitter 4–9s between each send
+        await new Promise(r => setTimeout(r, 4000 + Math.floor(Math.random() * 5000)));
       }
 
       return m.reply(
@@ -510,14 +416,18 @@ module.exports = {
       );
 
       if (target === 'all') {
-        const groups = await sock.groupFetchAllParticipating();
+        const groups  = await sock.groupFetchAllParticipating();
+        const entries = Object.entries(groups);
+        const MAX_FW  = 50;
+        const targets = entries.slice(0, MAX_FW);
         let sent = 0;
-        for (const [jid] of Object.entries(groups)) {
+        for (const [jid] of targets) {
           await sock.sendMessage(jid, {
             forward: { key: m.quoted.key, message: m.quoted.message }
           }).catch(() => {});
           sent++;
-          await new Promise(r => setTimeout(r, 2000 + Math.floor(Math.random() * 2000)));
+          // Human-like jitter 4–8s
+          await new Promise(r => setTimeout(r, 4000 + Math.floor(Math.random() * 4000)));
         }
         return m.reply(`✅ *Forwarded to ${sent} groups!*\n\n${cfg.footer}`);
       }

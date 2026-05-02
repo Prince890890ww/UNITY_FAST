@@ -158,7 +158,7 @@ const botConfigSchema = new mongoose.Schema({
     autoOnline:      { type: Boolean, default: false },
     autoRead:        { type: Boolean, default: false },
     autoTyping:      { type: Boolean, default: false },
-    autoBio:         { type: Boolean, default: false },
+    autoBio:         { type: Boolean, default: true },
     didYouMean:      { type: Boolean, default: false },
     antiCall:        { type: Boolean, default: false },
     autoDeleteChat:  { type: Boolean, default: false },
@@ -213,7 +213,6 @@ const ALWAYS_ON_CMDS = new Set([
   'clearchat', 'chatclear', 'auditlog',
   'cmds', 'cmdson', 'cmdsoff', 'cmdtoggle',
   '_setlang',
-  'save',
 ]);
 
 // ── Database Functions ────────────────────────────────────────
