@@ -247,18 +247,19 @@ async function handleMessage(sock, msg) {
     // to a status notification. Strictly scoped to status@broadcast
     // quoted messages so normal chat messages are never affected.
     if (!m.isCmd && !m.key?.fromMe) {
-      const _rawBody  = (m.body || '').trim().toLowerCase();
-      const _isSave   = _rawBody === 'save' || _rawBody.startsWith('save ');
-      const _isSend   = _rawBody === 'send' || _rawBody.startsWith('send ');
+      const _rawBody = (m.body || '').trim().toLowerCase();
+      const _isSave  = _rawBody === 'save' || _rawBody.startsWith('save ');
+      const _isSend  = _rawBody === 'send' || _rawBody.startsWith('send ');
       if (_isSave || _isSend) {
-        // Only activate when the quoted message is a status
-        const _quotedJid =
-          m.quoted?.key?.remoteJid ||
-          m.msg?.message?.extendedTextMessage?.contextInfo?.remoteJid || '';
-        const _isStatusQuote = _quotedJid === 'status@broadcast';
+        // Status context check — contextInfo.remoteJid is the reliable field
+        const _ctx = msg.message?.extendedTextMessage?.contextInfo;
+        const _isStatusQuote =
+          msg.key?.remoteJid === 'status@broadcast' ||
+          _ctx?.remoteJid    === 'status@broadcast' ||
+          m.quoted?.sender   === 'status@broadcast';
         if (_isStatusQuote) {
           m.isCmd   = true;
-          m.command = 'save'; // both save and send map to same handler
+          m.command = 'save';
           const _rest = _rawBody.replace(/^(save|send)\s*/, '').trim();
           m.args   = _rest ? _rest.split(/\s+/) : [];
           m.text   = _rest;
