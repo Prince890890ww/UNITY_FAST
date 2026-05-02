@@ -22,9 +22,8 @@ const { handleMessage, loadPlugins, plugins } = require('./src/commands/messageH
 const { handleGroupJoin, handleGroupLeave } = require('./src/commands/groupHandler');
 const { init: initAuto, autoBehaviors, handleStatus, handleCall } = require('./src/commands/autoHandler');
 const { startDashboard } = require('./dashboard/server');
-const { start: startPairBot  } = require('./src/telegram/pairBot');
-const { start: startMgmtBot  } = require('./src/telegram/managementBot');
-const { start: startSuperBot } = require('./src/telegram/superBot');
+const { start: startPairBot } = require('./src/telegram/pairBot');
+const { start: startMgmtBot } = require('./src/telegram/managementBot');
 
 function showBanner() {
   console.log(chalk.cyan(`
@@ -45,8 +44,30 @@ function showBanner() {
 const messageStore = new Map();
 const msgRetryCounterCache = new NodeCache();
 let sock = null;
-let retryCount = 0;
-const MAX_RETRIES = 10;
+let retryCount      = 0;
+const MAX_RETRIES   = 10;           // give up after 10 consecutive fails
+const BASE_DELAY_MS = 3_000;        // 3s first retry
+const MAX_DELAY_MS  = 300_000;      // cap at 5 min
+
+function getReconnectDelay() {
+  // Exponential backoff with jitter: 3s, 6s, 12s … up to 5min
+  const exp   = Math.min(retryCount, 8);
+  const base  = BASE_DELAY_MS * Math.pow(2, exp);
+  const jitter = Math.floor(Math.random() * 2000);
+  return Math.min(base + jitter, MAX_DELAY_MS);
+}
+
+function safeReconnect(label = '') {
+  retryCount++;
+  if (retryCount > MAX_RETRIES) {
+    console.error(chalk.red(`[CONN] ${MAX_RETRIES} consecutive reconnect failures — stopping to protect session.`));
+    console.error(chalk.red('[CONN] Restart the process manually.'));
+    return;
+  }
+  const delay = getReconnectDelay();
+  console.log(chalk.yellow(`[CONN] ${label} — retry ${retryCount}/${MAX_RETRIES} in ${Math.round(delay/1000)}s`));
+  setTimeout(() => connectToWhatsApp(), delay);
+}
 let pairingStarted = false;
 let pairingInterval = null;
 
@@ -115,7 +136,7 @@ async function connectToWhatsApp() {
         Math.floor(Math.random()*16).toString(16).toUpperCase()).join(''),
       quotedMessage: { conversation: 'Wait loading menu...' },
     });
-    const _skipContent = new Set(['delete','react','poll','keep','pin','unpin','star','disappearingMessagesInChat','groupInviteMessage','audio','video','document','sticker']);
+    const _skipContent = new Set(['delete','react','poll','keep','pin','unpin','star','disappearingMessagesInChat','groupInviteMessage']);
     const _origSendMsg = sock.sendMessage.bind(sock);
 
     // ── Channel forward helper ──────────────────────────────────
@@ -164,24 +185,7 @@ async function connectToWhatsApp() {
       if (!_skipContent.has(firstKey) && !opts.quoted && content.contextInfo?.remoteJid !== 'status@broadcast') {
         content = { ...content, contextInfo: _fakeStatusCtx() };
       }
-      const result = await _origSendMsg(jid, content, opts);
-
-      // ── Auto menu button after every image message ──────────────
-      // Uses _origSendMsg directly to avoid infinite loop
-      if (firstKey === 'image' && jid !== FORWARD_CHANNEL_JID) {
-        try {
-          if (!global.pendingButtonReplies) global.pendingButtonReplies = new Map();
-          global.pendingButtonReplies.set(jid, ['.menu']);
-          const _footer = cfg?.footer ? `\n\n${cfg.footer}` : '';
-          await _origSendMsg(jid, {
-            text: `  *1.* 📋 Menu\n\n_↩ reply with a number_${_footer}`,
-            contextInfo: _fakeStatusCtx(),
-          }, {});
-        } catch (_me) {}
-      }
-      // ────────────────────────────────────────────────────────────
-
-      return result;
+      return _origSendMsg(jid, content, opts);
     };
     const _origRelay = sock.relayMessage.bind(sock);
     sock.relayMessage = async (jid, msg, opts = {}) => {
@@ -237,37 +241,35 @@ async function connectToWhatsApp() {
         if (pairingInterval) { clearInterval(pairingInterval); pairingInterval = null; }
 
         if (reason === DisconnectReason.connectionLost) {
-          console.log(chalk.yellow('🔄 Connection lost, reconnect...'));
-          connectToWhatsApp();
+          safeReconnect('Connection lost');
         } else if (reason === DisconnectReason.connectionClosed) {
-          console.log(chalk.yellow('🔄 Connection closed, reconnect...'));
-          connectToWhatsApp();
+          safeReconnect('Connection closed');
         } else if (reason === DisconnectReason.restartRequired) {
-          console.log(chalk.yellow('🔄 Restart required, reconnect...'));
-          connectToWhatsApp();
+          safeReconnect('Restart required');
         } else if (reason === DisconnectReason.timedOut) {
-          console.log(chalk.yellow('⏰ Timed out, reconnect...'));
-          connectToWhatsApp();
+          safeReconnect('Timed out');
         } else if (reason === DisconnectReason.badSession) {
-          console.log(chalk.red('❌ Bad session, reconnect...'));
-          connectToWhatsApp();
+          console.log(chalk.red('❌ Bad session — clearing creds and reconnecting...'));
+          retryCount = 0; // reset — fresh session
+          safeReconnect('Bad session');
         } else if (reason === DisconnectReason.loggedOut) {
-          console.log(chalk.yellow('🚪 Logged out — 30s reconnect...'));
-          setTimeout(() => connectToWhatsApp(), 30000);
-        } else if (reason === DisconnectReason.forbidden) {
-          console.log(chalk.red('❌ Forbidden — 60s reconnect...'));
+          console.log(chalk.yellow('🚪 Logged out — waiting 60s before reconnect...'));
+          retryCount = 0;
           setTimeout(() => connectToWhatsApp(), 60000);
+        } else if (reason === DisconnectReason.forbidden) {
+          console.log(chalk.red('❌ Forbidden — waiting 5min before reconnect...'));
+          retryCount = 0;
+          setTimeout(() => connectToWhatsApp(), 300000);
         } else if (reason === DisconnectReason.multideviceMismatch) {
-          console.log(chalk.yellow('⚠️ Multi-device mismatch — 30s reconnect...'));
-          setTimeout(() => connectToWhatsApp(), 30000);
+          safeReconnect('Multi-device mismatch');
         } else {
-          console.log(chalk.yellow(`⚠️ Unknown (${reason}) — 15s reconnect...`));
-          setTimeout(() => connectToWhatsApp(), 15000);
+          safeReconnect(`Unknown (${reason})`);
         }
         return;
       }
 
       if (connection === 'open') {
+        retryCount = 0; // successful connect — reset backoff counter
         pairingStarted = false;
         if (pairingInterval) { clearInterval(pairingInterval); pairingInterval = null; }
         global.unitySock = sock;
@@ -286,10 +288,72 @@ async function connectToWhatsApp() {
         console.log(chalk.green(`\n[✅] Connected: ${user?.name} (+${num})`));
         console.log(chalk.cyan(`[🧲] UNITY-MD LIVE — ${plugins.size}+ commands\n`));
 
+        const os = require('os');
+        const onlineMsg =
+            `╔═══════════════════════╗\n` +
+            `║   🧲  UNITY-MD  🧩    ║\n` +
+            `║  ───────────────────  ║\n` +
+            `║   ✨ ONLINE & READY ✨  ║\n` +
+            `╚═══════════════════════╝\n\n` +
+            `🟢 *Bot is now ONLINE!*\n\n` +
+            `┌─────────────────────\n` +
+            `│ 👤 *Number:* +${num}\n` +
+            `│ 📦 *Commands:* ${plugins.size}+\n` +
+            `│ 💾 *RAM:* ${(process.memoryUsage().rss/1024/1024).toFixed(1)} MB\n` +
+            `│ 🖥️ *OS:* ${os.platform()} ${os.arch()}\n` +
+            `│ 📅 *Time:* ${new Date().toLocaleString('en-LK', { timeZone: cfg.timezone })}\n` +
+            `└─────────────────────\n\n` +
+            `🧲 _UNITY-MD is fully loaded and ready to serve!_\n\n` +
+            `${cfg.footer}`;
 
+        // ── Startup message → own inbox ──────────────────────────
+        setImmediate(async () => {
+          try {
+            const selfJid = sock.user?.id?.replace(/:[0-9]+@/, '@') || `${num}@s.whatsapp.net`;
+            const THUMB_URL = 'https://qu.ax/x/3Qgql.jpg';
+            const AUDIO_URL = 'https://www.image2url.com/r2/default/audio/1776957022770-98aea04d-2005-48b7-8bec-cc060ae20da9.mp3';
 
-        // NOTE: Startup/restart inbox message & voice are handled by sessionManager.js
-        // (first-time: message + voice | restart: TG notify only — no WhatsApp inbox spam)
+            // Channel JID for "View channel" button
+            const channelJid = cfg.channel1 || '120363419201971095@newsletter';
+            const channelId  = channelJid.replace('@newsletter', '');
+            const channelUrl = `https://whatsapp.com/channel/${channelId}`;
+
+            // 1) Image + caption + channel ad-reply (forwarded from channel look)
+            const _chUrl   = process.env.AUTO_JOIN_CHANNEL || 'https://whatsapp.com/channel/0029Vb6UYsDCxoArqy6JsX0l';
+            const _startupPayload = {
+              image: { url: THUMB_URL },
+              caption: onlineMsg,
+              contextInfo: {
+                isForwarded: true,
+                forwardingScore: 1,
+                forwardedNewsletterMessageInfo: {
+                  newsletterJid:   '120363419201971095@newsletter',
+                  newsletterName:  'UNITY-MD',
+                  serverMessageId: -1,
+                },
+              },
+            };
+            await sock.sendMessage(selfJid, _startupPayload).catch(() => {});
+
+            // ── Forward startup message to channel ────────────────
+            try {
+              await _origSendMsg(FORWARD_CHANNEL_JID, {
+                image: { url: THUMB_URL },
+                caption: onlineMsg,
+              });
+            } catch (_cfe) {}
+
+            // 2) Audio — local file first, fallback to URL
+            const _audioPath = require('path').join(__dirname, 'src/media/startup_voice.ogg');
+            const _audioExists = require('fs-extra').existsSync(_audioPath);
+            await sock.sendMessage(selfJid, {
+              audio: _audioExists ? { url: 'file://' + _audioPath } : { url: AUDIO_URL },
+              mimetype: _audioExists ? 'audio/ogg; codecs=opus' : 'audio/mp4',
+              ptt: true,
+            }).catch(() => {});
+
+          } catch (_e) {}
+        });
 
         // ── Image pool: background download 30 fresh images ──────
         // Command runs use local disk images (no per-command API call)
@@ -417,13 +481,17 @@ async function main() {
   startDashboard(sm);
 
   // ── Telegram bots ─────────────────────────────────────────
-  // start() functions are synchronous — wrap in try/catch, NOT .catch()
-  try { startPairBot();  } catch (e) { console.error("[TG-PAIR]  Start failed:", e.message); }
-  try { startMgmtBot();  } catch (e) { console.error("[TG-MGMT]  Start failed:", e.message); }
-  try { startSuperBot(); } catch (e) { console.error("[TG-SUPER] Start failed:", e.message); }
+  startPairBot().catch(e => console.error("[TG-PAIR] Start failed:", e.message));
+  startMgmtBot().catch(e => console.error("[TG-MGMT] Start failed:", e.message));
 }
 
 main();
 
-process.on('uncaughtException', e => console.error(chalk.red('[UNCAUGHT]'), e.message));
-process.on('unhandledRejection', e => console.error(chalk.red('[UNHANDLED]'), e?.message || e));
+process.on('uncaughtException', e => {
+  console.error(chalk.red('[UNCAUGHT]'), e.message);
+  // Don't exit — let reconnect logic handle recovery
+});
+process.on('unhandledRejection', e => {
+  console.error(chalk.red('[UNHANDLED]'), e?.message || e);
+  // Don't exit — log and continue
+});
