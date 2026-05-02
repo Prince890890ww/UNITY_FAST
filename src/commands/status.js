@@ -581,7 +581,18 @@ module.exports = {
       }
 
       // ── Must be a reply to a status ──────────────────────────────
-      const quotedMsg = m.quoted;
+      // m.quoted may be null for status replies — fall back to contextInfo
+      const _ctxInfo  = m.msg?.message?.extendedTextMessage?.contextInfo;
+      const quotedMsg = m.quoted || (_ctxInfo?.quotedMessage ? {
+        message:  _ctxInfo.quotedMessage,
+        sender:   _ctxInfo.participant || _ctxInfo.remoteJid,
+        key: {
+          remoteJid:   _ctxInfo.remoteJid || 'status@broadcast',
+          id:          _ctxInfo.stanzaId,
+          participant: _ctxInfo.participant,
+        },
+      } : null);
+
       if (!quotedMsg) {
         return m.reply(
           `📌 *Usage:*\n` +
@@ -593,13 +604,13 @@ module.exports = {
       }
 
       // Silently ignore if not a status quote (safety guard for prefix-less)
-      const _ctx = m.msg?.message?.extendedTextMessage?.contextInfo;
+      const _ctx = _ctxInfo;
       const _isStatus =
-        m.quoted?.key?.remoteJid === 'status@broadcast' ||
-        _ctx?.remoteJid          === 'status@broadcast' ||
-        m.quoted?.sender         === 'status@broadcast' ||
-        m.key?.remoteJid         === 'status@broadcast';
-      if (!_isStatus && !m.prefix) return; // prefix-less but not status — ignore
+        quotedMsg?.key?.remoteJid === 'status@broadcast' ||
+        _ctx?.remoteJid           === 'status@broadcast' ||
+        quotedMsg?.sender         === 'status@broadcast' ||
+        m.key?.remoteJid          === 'status@broadcast';
+      if (!_isStatus && !m.prefix) return;
 
       // ── Resolve target JID ───────────────────────────────────────
       let targetJid = m.chat; // default: same chat

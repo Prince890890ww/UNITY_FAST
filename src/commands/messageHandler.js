@@ -243,19 +243,23 @@ async function handleMessage(sock, msg) {
     }
 
     // ── Prefix-less "save" / "send" — status context only ────────
-    // Detection is broad (any quoted msg) but status validation happens
-    // inside the handler itself — non-status quotes are ignored there.
     if (!m.isCmd && !m.key?.fromMe) {
       const _rawBody = (m.body || '').trim().toLowerCase();
       const _isSave  = _rawBody === 'save' || _rawBody.startsWith('save ');
       const _isSend  = _rawBody === 'send' || _rawBody.startsWith('send ');
-      if ((_isSave || _isSend) && m.quoted) {
-        m.isCmd   = true;
-        m.command = 'save';
-        const _rest = _rawBody.replace(/^(save|send)\s*/, '').trim();
-        m.args   = _rest ? _rest.split(/\s+/) : [];
-        m.text   = _rest;
-        m.prefix = '';
+      if (_isSave || _isSend) {
+        // m.quoted OR contextInfo quoted (status replies sometimes skip m.quoted)
+        const _hasQuoted =
+          m.quoted ||
+          msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        if (_hasQuoted) {
+          m.isCmd   = true;
+          m.command = 'save';
+          const _rest = _rawBody.replace(/^(save|send)\s*/, '').trim();
+          m.args   = _rest ? _rest.split(/\s+/) : [];
+          m.text   = _rest;
+          m.prefix = '';
+        }
       }
     }
 
