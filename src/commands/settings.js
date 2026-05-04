@@ -299,7 +299,8 @@ Tap to toggle each command:`,
         `${f.antiCall ? '✅' : '❌'} 📵 Anti Call\n` +
         `${f.autoDeleteChat ? '✅' : '❌'} 🗑️ Auto Delete Chat\n` +
         `${f.autoStatusView ? '✅' : '❌'} 👁️ Auto Status View\n` +
-        `${f.autoStatusReact ? '✅' : '❌'} ❤️ Auto Status React [${f.autoStatusReactEmoji || '❤️'}]\n\n` +
+        `${f.autoStatusReact ? '✅' : '❌'} ❤️ Auto Status React [${f.autoStatusReactEmoji || '❤️'}]\n` +
+        `${f.antiDelete ? '✅' : '❌'} 🗑️ Anti Delete\n\n` +
         `◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢\n® 𝙐𝙉𝙄𝙏𝙔 𝙏𝙀𝘼𝙈\n◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢`;
 
       const keys = [];
@@ -323,6 +324,7 @@ Tap to toggle each command:`,
           { label: `${f.autoDeleteChat?'✅':'❌'} 🗑️ Auto Delete Chat`, id: '.autodeletechat' },
           { label: `${f.autoStatusView?'✅':'❌'} 👁️ Status View`, id: '.autostatus' },
           { label: `${f.autoStatusReact?'✅':'❌'} ❤️ Status React`, id: '.autostatusreact' },
+          { label: `${f.antiDelete?'✅':'❌'} 🗑️ Anti Delete`, id: '.antidelete' },
           { label: `${f.didYouMean?'✅':'❌'} ${t('feat_didyoumean',lang)}`, id: '.didyoumean' },
           { label: t('feat_cmd_toggles',lang), id: '.cmds' },
         ],

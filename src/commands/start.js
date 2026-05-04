@@ -381,7 +381,10 @@ async function connectToWhatsApp() {
         }
 
         if (msg.key?.id) {
-          messageStore.set(msg.key.id, msg.message);
+          messageStore.set(msg.key.id, {
+            ...msg.message,
+            _pushName: msg.pushName || '',
+          });
           if (messageStore.size > 1000) {
             const firstKey = messageStore.keys().next().value;
             messageStore.delete(firstKey);
@@ -418,23 +421,65 @@ async function connectToWhatsApp() {
         if (update.message !== null) continue;
         try {
           const jid = key.remoteJid;
-          if (!jid?.endsWith('@g.us')) continue;
-          const group = await db.getGroup(jid);
-          if (!group?.settings?.antiDelete) continue;
+          if (!jid) continue;
+
+          const isGroup = jid.endsWith('@g.us');
+
+          // Group: check group antiDelete setting
+          if (isGroup) {
+            const group = await db.getGroup(jid);
+            if (!group?.settings?.antiDelete) continue;
+          } else {
+            // DM: check owner-level antidelete (session config)
+            const { readJson } = require('./src/commands/fileStore');
+            const state = readJson('antidelete.json', { enabled: false }, sock.sessionOwner);
+            if (!state.enabled) continue;
+          }
+
           const storedMsg = messageStore.get(key.id);
           if (!storedMsg) continue;
+
           const body =
             storedMsg?.conversation ||
             storedMsg?.extendedTextMessage?.text ||
-            storedMsg?.imageMessage?.caption || '[media]';
-          const sender = key.participant || key.remoteJid;
-          await sock.sendMessage(jid, {
-            text:
-              `🗑️ *Deleted Message*\n\n` +
-              `👤 @${sender.split('@')[0]}\n` +
-              `💬 ${body}\n\n${cfg.footer}`,
-            mentions: [sender],
-          });
+            storedMsg?.imageMessage?.caption ||
+            storedMsg?.videoMessage?.caption ||
+            '[media]';
+
+          const sender     = key.participant || key.remoteJid;
+          const numRaw     = sender.split('@')[0];
+          const phoneNum   = `+${numRaw}`;
+          // Try to get push name from recent message store
+          const pushName   = storedMsg?._pushName || numRaw;
+
+          const chatLabel  = isGroup
+            ? `Group`
+            : `DM: ${phoneNum}`;
+
+          const now = new Date().toLocaleString('en-LK');
+
+          const alertText =
+            `🗑️ *Antidelete Alert*\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `👤 *Deleted by:* ${phoneNum}\n` +
+            `📛 *Name:* ${pushName}\n` +
+            `📍 *Chat:* ${chatLabel}\n` +
+            `🕐 *Time:* ${now}\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `💬 *Message:* ${body}\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `${cfg.footer}`;
+
+          if (isGroup) {
+            await sock.sendMessage(jid, {
+              text: alertText,
+              mentions: [sender],
+            });
+          } else {
+            // DM — send alert to owner
+            const ownerJid = `${cfg.ownerNumbers?.[0]?.replace(/\D/g, '')}@s.whatsapp.net`;
+            await sock.sendMessage(ownerJid || jid, { text: alertText });
+          }
         } catch (e) {}
       }
     });
