@@ -787,8 +787,11 @@ async function startSession(userId, onUpdate) {
                     const originalFromMe = storedMsg ? storedMsg._fromMe : proto.key.fromMe;
                     if (originalFromMe) continue;
 
-                    // chat partner ගේ JID = _senderJid (upsert time ගෙ remoteJid)
-                    deleterJid = storedMsg?._senderJid || chatJid;
+                    // chat partner ගේ JID:
+                    // proto.key.remoteJid = original deleted message ගෙ chat JID (reliable)
+                    // storedMsg._senderJid = upsert time ගෙ remoteJid (reliable)
+                    // chatJid (msg.key.remoteJid) = bot ගේ own JID (WRONG — never use)
+                    deleterJid = proto.key.remoteJid || storedMsg?._senderJid || '';
                     const partnerNum = deleterJid.split('@')[0].split(':')[0];
                     chatLabel  = `DM: +${partnerNum}`;
                   }
