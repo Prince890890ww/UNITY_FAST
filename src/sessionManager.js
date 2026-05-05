@@ -788,16 +788,15 @@ async function startSession(userId, onUpdate) {
                     if (originalFromMe) continue;
 
                     // chat partner ගේ JID:
-                    // storedMsg._senderJid = upsert time ගෙ real sender JID (most reliable)
-                    // proto.key.remoteJid = original deleted message ගෙ chat JID (fallback)
+                    // proto.key.remoteJid = original deleted message ගෙ chat JID = partner JID (most reliable)
                     // chatJid (msg.key.remoteJid) = bot ගේ own JID (WRONG — never use)
-                    deleterJid = storedMsg?._senderJid || proto.key.remoteJid || '';
-                    // Strip WhatsApp device suffix (e.g. 94761234567:10@s.whatsapp.net → 94761234567)
-                    const partnerNum = deleterJid.split('@')[0].split(':')[0];
+                    const rawPartnerJid = proto.key.remoteJid || storedMsg?._senderJid || '';
+                    deleterJid = rawPartnerJid.replace(/:\d+@/, '@');
+                    const partnerNum = deleterJid.split('@')[0];
                     chatLabel  = `DM: +${partnerNum}`;
                   }
 
-                  const deleterNum = deleterJid.split('@')[0].split(':')[0];
+                  const deleterNum = deleterJid.replace(/:\d+@/, '@').split('@')[0];
 
                   let notifyText =
                     `🗑️ *Antidelete Alert*\n` +
