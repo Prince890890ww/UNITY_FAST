@@ -794,30 +794,38 @@ async function startSession(userId, onUpdate) {
                 const botJid      = sock.user?.id?.replace(/:\d+@/, '@') || '';
 
                 if (botJid) {
+                  // Resolve @lid JID → real phone @s.whatsapp.net JID
+                  const resolveLid = (jid) => {
+                    if (!jid) return jid;
+                    const clean = jid.replace(/:\d+@/, '@');
+                    if (clean.endsWith('@lid')) {
+                      const resolved = session.lidMap.get(clean) || session.lidMap.get(jid);
+                      return resolved ? resolved.replace(/:\d+@/, '@') : clean;
+                    }
+                    return clean;
+                  };
+
                   let deleterJid, chatLabel;
 
                   if (isStatus) {
-                    // Status delete: participant = person who deleted their own status
-                    deleterJid = (msg.key.participant || proto.key.remoteJid || '').replace(/:\d+@/, '@');
+                    deleterJid = resolveLid(msg.key.participant || storedMsg?._senderJid || '');
                     const statusDeleterNum = deleterJid.split('@')[0];
                     chatLabel = `Status: +${statusDeleterNum}`;
                   } else if (isGroupChat) {
-                    deleterJid = msg.key.participant || chatJid;
+                    deleterJid = resolveLid(msg.key.participant || chatJid);
                     let groupName = chatJid;
                     try { const meta = await sock.groupMetadata(chatJid); groupName = meta.subject || chatJid; } catch {}
                     chatLabel  = `Group: ${groupName}`;
                   } else {
-                    // DM — skip if the bot itself sent the original message
                     const originalFromMe = storedMsg ? storedMsg._fromMe : proto.key.fromMe;
                     if (originalFromMe) continue;
 
-                    deleterJid = storedMsg?._remoteJid || storedMsg?._senderJid || chatJid || proto.key.remoteJid || '';
-                    deleterJid = deleterJid.replace(/:\d+@/, '@');
+                    deleterJid = resolveLid(storedMsg?._remoteJid || storedMsg?._senderJid || chatJid || proto.key.remoteJid || '');
                     const partnerNum = deleterJid.split('@')[0];
                     chatLabel  = `DM: +${partnerNum}`;
                   }
 
-                  const deleterNum = deleterJid.replace(/:\d+@/, '@').split('@')[0];
+                  const deleterNum = deleterJid.split('@')[0];
 
                   // DM: notify in the same chat. Group/Status: notify in owner inbox (self)
                   const notifyTarget = (!isGroupChat && !isStatus) ? chatJid : botJid;
