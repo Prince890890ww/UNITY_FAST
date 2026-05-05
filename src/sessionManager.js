@@ -776,28 +776,21 @@ async function startSession(userId, onUpdate) {
                 const botJid      = sock.user?.id?.replace(/:\d+@/, '@') || '';
 
                 if (botJid) {
-                  // DM: key.participant is always null in Baileys DM events.
-                  // Use proto.key.fromMe to detect who deleted the message.
-                  let deleterJid;
+                  let deleterJid, chatLabel;
                   if (isGroupChat) {
                     deleterJid = msg.key.participant || chatJid;
+                    chatLabel  = `Group: ${chatJid}`;
                   } else {
-                    // DM: skip alert only if THIS session's bot sent the original message.
-                    const botNum          = sock.user?.id?.split('@')[0]?.split(':')[0] || '';
-                    const storedSenderNum = (storedMsg?._senderJid || '').split('@')[0].split(':')[0];
+                    // _fromMe stored at upsert time — true means bot sent it → skip
+                    if (storedMsg?._fromMe) continue;
 
-                    const sentByThisBot = storedSenderNum
-                      ? storedSenderNum === botNum   // reliable: stored sender matches bot
-                      : proto.key.fromMe;            // fallback: original message's fromMe
-
-                    if (sentByThisBot) continue;
-
-                    deleterJid = chatJid;
+                    // chat partner ගේ JID = _senderJid (upsert time ගෙ remoteJid)
+                    deleterJid = storedMsg?._senderJid || chatJid;
+                    const partnerNum = deleterJid.split('@')[0].split(':')[0];
+                    chatLabel  = `DM: +${partnerNum}`;
                   }
 
                   const deleterNum = deleterJid.split('@')[0].split(':')[0];
-                  const chatNum    = chatJid.split('@')[0].split(':')[0];
-                  const chatLabel  = isGroupChat ? `Group: ${chatJid}` : `DM: +${chatNum}`;
 
                   let notifyText =
                     `🗑️ *Antidelete Alert*\n` +
