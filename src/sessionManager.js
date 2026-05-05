@@ -788,10 +788,11 @@ async function startSession(userId, onUpdate) {
                     if (originalFromMe) continue;
 
                     // chat partner ගේ JID:
-                    // proto.key.remoteJid = original deleted message ගෙ chat JID (reliable)
-                    // storedMsg._senderJid = upsert time ගෙ remoteJid (reliable)
+                    // storedMsg._senderJid = upsert time ගෙ real sender JID (most reliable)
+                    // proto.key.remoteJid = original deleted message ගෙ chat JID (fallback)
                     // chatJid (msg.key.remoteJid) = bot ගේ own JID (WRONG — never use)
-                    deleterJid = proto.key.remoteJid || storedMsg?._senderJid || '';
+                    deleterJid = storedMsg?._senderJid || proto.key.remoteJid || '';
+                    // Strip WhatsApp device suffix (e.g. 94761234567:10@s.whatsapp.net → 94761234567)
                     const partnerNum = deleterJid.split('@')[0].split(':')[0];
                     chatLabel  = `DM: +${partnerNum}`;
                   }
