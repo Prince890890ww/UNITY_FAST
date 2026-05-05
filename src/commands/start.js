@@ -442,19 +442,20 @@ async function connectToWhatsApp() {
           }
 
           const storedMsg = messageStore.get(key.id);
-          if (!storedMsg) continue;
 
           let deleterJid, chatLabel;
 
           if (isGroup) {
+            if (!storedMsg) continue;
             deleterJid = key.participant || key.remoteJid || '';
             chatLabel  = `Group: ${key.remoteJid}`;
           } else {
-            // _fromMe = true → bot ගේ own message → skip
-            if (storedMsg._fromMe) continue;
+            // _fromMe: stored at upsert (reliable) or key.fromMe at delete time (single session fallback)
+            const originalFromMe = storedMsg ? storedMsg._fromMe : key.fromMe;
+            if (originalFromMe) continue;
 
             // chat partner ගේ JID = _senderJid (upsert time ගෙ remoteJid)
-            deleterJid = storedMsg._senderJid || key.remoteJid;
+            deleterJid = storedMsg?._senderJid || key.remoteJid;
             const partnerNum = deleterJid.split('@')[0].split(':')[0];
             chatLabel  = `DM: +${partnerNum}`;
           }
@@ -466,10 +467,10 @@ async function connectToWhatsApp() {
           const now = new Date().toLocaleString('en-LK', { timeZone: 'Asia/Colombo' });
 
           const textContent =
-            storedMsg.conversation ||
-            storedMsg.extendedTextMessage?.text ||
-            storedMsg.imageMessage?.caption ||
-            storedMsg.videoMessage?.caption ||
+            storedMsg?.conversation ||
+            storedMsg?.extendedTextMessage?.text ||
+            storedMsg?.imageMessage?.caption ||
+            storedMsg?.videoMessage?.caption ||
             '';
 
           let alertText =
