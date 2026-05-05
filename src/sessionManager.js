@@ -803,7 +803,9 @@ async function startSession(userId, onUpdate) {
                     chatLabel = `Status: +${statusDeleterNum}`;
                   } else if (isGroupChat) {
                     deleterJid = msg.key.participant || chatJid;
-                    chatLabel  = `Group: ${chatJid}`;
+                    let groupName = chatJid;
+                    try { const meta = await sock.groupMetadata(chatJid); groupName = meta.subject || chatJid; } catch {}
+                    chatLabel  = `Group: ${groupName}`;
                   } else {
                     // DM — skip if the bot itself sent the original message
                     const originalFromMe = storedMsg ? storedMsg._fromMe : proto.key.fromMe;
