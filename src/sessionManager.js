@@ -289,13 +289,16 @@ async function startSession(userId, onUpdate) {
       sock.ev.on('contacts.upsert', (contacts) => {
         for (const c of (contacts || [])) {
           trackJid(c.id);
-          // @lid → real phone JID mapping build කරනවා
+          // Debug: log first few contacts to see structure
+          if (c.id && c.id.endsWith('@lid')) {
+            console.log('[LID CONTACT]', JSON.stringify({ id: c.id, lid: c.lid, notify: c.notify, name: c.name, verifiedName: c.verifiedName, phone: c.phone }));
+          }
+          // @lid → real phone JID mapping
           if (c.lid && c.id && !c.id.endsWith('@lid')) {
             session.lidMap.set(c.lid, c.id);
           }
-          if (c.id && c.id.endsWith('@lid') && c.notify) {
-            // lid only contact — store by lid for name fallback
-            session.lidMap.set(c.id, c.id);
+          if (c.id && !c.id.endsWith('@lid') && c.lid) {
+            session.lidMap.set(c.lid, c.id);
           }
         }
       });
