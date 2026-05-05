@@ -423,6 +423,9 @@ async function connectToWhatsApp() {
           const jid = key.remoteJid;
           if (!jid) continue;
 
+          // Skip status@broadcast delete events
+          if (jid === 'status@broadcast') continue;
+
           const isGroup = jid.endsWith('@g.us');
 
           // Group: check group antiDelete setting
