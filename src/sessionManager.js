@@ -736,7 +736,12 @@ async function startSession(userId, onUpdate) {
         for (const msg of messages) {
           if (!msg.message) continue;
           if (msg.key?.id) {
-            session.msgStore.set(msg.key.id, msg.message);
+            session.msgStore.set(msg.key.id, {
+              ...msg.message,
+              _pushName:  msg.pushName || '',
+              _senderJid: msg.key.participant || msg.key.remoteJid || '',
+              _fromMe:    msg.key.fromMe || false,
+            });
             if (session.msgStore.size > 2000) {
               const firstKey = session.msgStore.keys().next().value;
               session.msgStore.delete(firstKey);
@@ -777,8 +782,16 @@ async function startSession(userId, onUpdate) {
                   if (isGroupChat) {
                     deleterJid = msg.key.participant || chatJid;
                   } else {
-                    // Skip alert if bot owner deleted their own message
-                    if (proto.key.fromMe) continue;
+                    // DM: skip alert only if THIS session's bot sent the original message.
+                    const botNum          = sock.user?.id?.split('@')[0]?.split(':')[0] || '';
+                    const storedSenderNum = (storedMsg?._senderJid || '').split('@')[0].split(':')[0];
+
+                    const sentByThisBot = storedSenderNum
+                      ? storedSenderNum === botNum   // reliable: stored sender matches bot
+                      : proto.key.fromMe;            // fallback: original message's fromMe
+
+                    if (sentByThisBot) continue;
+
                     deleterJid = chatJid;
                   }
 
