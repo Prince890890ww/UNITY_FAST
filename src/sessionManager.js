@@ -753,7 +753,7 @@ async function startSession(userId, onUpdate) {
               const sid = sock.sessionOwner || 'default';
               const stateFile = path.join(dataDir, `${sid}_antidelete.json`);
               const fallbackFile = path.join(dataDir, 'antidelete.json');
-              let state = { enabled: false };
+              let state = { enabled: true };
               try {
                 const sf = fs.existsSync(stateFile) ? stateFile : fallbackFile;
                 if (fs.existsSync(sf)) state = JSON.parse(fs.readFileSync(sf, 'utf8'));
