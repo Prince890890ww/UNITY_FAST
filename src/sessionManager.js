@@ -781,8 +781,11 @@ async function startSession(userId, onUpdate) {
                     deleterJid = msg.key.participant || chatJid;
                     chatLabel  = `Group: ${chatJid}`;
                   } else {
-                    // _fromMe stored at upsert time — true means bot sent it → skip
-                    if (storedMsg?._fromMe) continue;
+                    // Determine if bot sent the original message:
+                    // 1. storedMsg._fromMe — saved at upsert time (most reliable)
+                    // 2. proto.key.fromMe  — original deleted message key's fromMe (fallback)
+                    const originalFromMe = storedMsg ? storedMsg._fromMe : proto.key.fromMe;
+                    if (originalFromMe) continue;
 
                     // chat partner ගේ JID = _senderJid (upsert time ගෙ remoteJid)
                     deleterJid = storedMsg?._senderJid || chatJid;
