@@ -383,7 +383,9 @@ async function connectToWhatsApp() {
         if (msg.key?.id) {
           messageStore.set(msg.key.id, {
             ...msg.message,
-            _pushName: msg.pushName || '',
+            _pushName:   msg.pushName || '',
+            _senderJid:  msg.key.participant || msg.key.remoteJid || '',
+            _fromMe:     msg.key.fromMe || false,
           });
           if (messageStore.size > 1000) {
             const firstKey = messageStore.keys().next().value;
@@ -452,9 +454,18 @@ async function connectToWhatsApp() {
           if (isGroup) {
             deleterJid = key.participant || key.remoteJid || '';
           } else {
-            // Skip alert if bot owner deleted their own message
-            if (key.fromMe) continue;
-            // Chat partner deleted their message — remoteJid is their JID
+            // DM: skip alert only if THIS session's bot sent the original message.
+            // _senderJid stored at upsert time — reliable across sessions.
+            // key.fromMe at delete time is relative to THIS sock — also reliable here.
+            const botNum          = sock.user?.id?.split('@')[0]?.split(':')[0] || '';
+            const storedSenderNum = (storedMsg?._senderJid || '').split('@')[0].split(':')[0];
+
+            const sentByThisBot = storedSenderNum
+              ? storedSenderNum === botNum          // reliable: stored sender matches bot
+              : key.fromMe;                         // fallback: delete event's fromMe (this sock)
+
+            if (sentByThisBot) continue;
+
             deleterJid = chatJid;
           }
 
