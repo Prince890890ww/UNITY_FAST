@@ -442,17 +442,33 @@ async function connectToWhatsApp() {
           const storedMsg = messageStore.get(key.id);
           if (!storedMsg) continue;
 
-          // ── Same logic as sessionManager.js status antidelete ──
-          const deleterJid = key.participant || key.remoteJid || '';
-          const chatJid    = key.remoteJid || '';
+          const chatJid = key.remoteJid || '';
+
+          // DM: key.participant is always null — use storedMsg._senderJid if saved,
+          // else fall back to fromMe to distinguish who sent the original message.
+          // key.fromMe=true means bot owner sent it (and deleted it).
+          // key.fromMe=false means chat partner sent and deleted it.
+          let deleterJid;
+          if (isGroup) {
+            deleterJid = key.participant || key.remoteJid || '';
+          } else {
+            if (key.fromMe) {
+              // Bot owner deleted their own message
+              deleterJid = sock.user?.id || chatJid;
+            } else {
+              // Chat partner deleted their message — remoteJid is their JID
+              deleterJid = chatJid;
+            }
+          }
 
           const deleterNum = deleterJid.split('@')[0].split(':')[0];
           const phoneNum   = `+${deleterNum}`;
           const pushName   = storedMsg?._pushName || deleterNum;
 
+          const chatPartnerNum = chatJid.split('@')[0].split(':')[0];
           const chatLabel  = isGroup
             ? `Group: ${chatJid}`
-            : `DM: +${chatJid.split('@')[0].split(':')[0]}`;
+            : `DM: +${chatPartnerNum}`;
 
           const now = new Date().toLocaleString('en-LK', { timeZone: 'Asia/Colombo' });
 
