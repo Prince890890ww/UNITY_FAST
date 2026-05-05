@@ -454,8 +454,11 @@ async function connectToWhatsApp() {
             const originalFromMe = storedMsg ? storedMsg._fromMe : key.fromMe;
             if (originalFromMe) continue;
 
-            // chat partner ගේ JID = _senderJid (upsert time ගෙ remoteJid)
-            deleterJid = storedMsg?._senderJid || key.remoteJid;
+            // chat partner ගේ JID = _senderJid (upsert time ගෙ remoteJid — reliable)
+            // key.remoteJid delete event ගෙ = bot ගේ own JID — NEVER use
+            const partnerJid = storedMsg?._senderJid || '';
+            if (!partnerJid) continue; // cache miss + no reliable JID → skip
+            deleterJid = partnerJid;
             const partnerNum = deleterJid.split('@')[0].split(':')[0];
             chatLabel  = `DM: +${partnerNum}`;
           }
