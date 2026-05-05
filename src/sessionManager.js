@@ -815,6 +815,18 @@ async function startSession(userId, onUpdate) {
                 const storedMsg   = session.msgStore.get(deletedKey.id);
                 const botJid      = sock.user?.id?.replace(/:\d+@/, '@') || '';
 
+                // DEBUG: log all JID info to find exact format
+                console.log('[ANTIDELETE JID DEBUG]', JSON.stringify({
+                  'msg.key.remoteJid': msg.key.remoteJid,
+                  'msg.key.participant': msg.key.participant,
+                  'proto.key.remoteJid': proto.key.remoteJid,
+                  'proto.key.participant': proto.key.participant,
+                  'storedMsg._remoteJid': storedMsg?._remoteJid,
+                  'storedMsg._senderJid': storedMsg?._senderJid,
+                  'storedMsg._pushName': storedMsg?._pushName,
+                  isGroupChat, isStatus,
+                }));
+
                 if (botJid) {
                   // Resolve @lid JID → real phone @s.whatsapp.net JID
                   const resolveLid = (jid) => {
@@ -847,7 +859,20 @@ async function startSession(userId, onUpdate) {
                     chatLabel  = `DM: +${partnerNum}`;
                   }
 
-                  const deleterNum = deleterJid.split('@')[0];
+                  // If JID is still a LID (unresolved), show pushName or "Unknown"
+                  const rawNum = deleterJid.split('@')[0];
+                  const isLid  = deleterJid.endsWith('@lid');
+                  const pushName = storedMsg?._pushName || '';
+                  const deleterDisplay = isLid
+                    ? (pushName ? `${pushName} (unsaved)` : 'Unknown (unsaved)')
+                    : `+${rawNum}`;
+
+                  // Also fix chatLabel if it still contains a LID number
+                  if (isLid) {
+                    if      (isStatus)    chatLabel = `Status: ${pushName || 'Unknown'}`;
+                    else if (isGroupChat) { /* group name already resolved above */ }
+                    else                  chatLabel = `DM: ${pushName || 'Unknown (unsaved)'}`;
+                  }
 
                   // DM: notify in the same chat. Group/Status: notify in owner inbox (self)
                   const notifyTarget = (!isGroupChat && !isStatus) ? chatJid : botJid;
@@ -855,7 +880,7 @@ async function startSession(userId, onUpdate) {
                   let notifyText =
                     `🗑️ *Antidelete Alert*\n` +
                     `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                    `👤 *Deleted by:* +${deleterNum}\n` +
+                    `👤 *Deleted by:* ${deleterDisplay}\n` +
                     `📍 *Chat:* ${chatLabel}\n` +
                     `🕐 *Time:* ${new Date().toLocaleString('en-LK', { timeZone: 'Asia/Colombo' })}\n` +
                     `━━━━━━━━━━━━━━━━━━━━━━\n`;
