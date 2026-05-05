@@ -799,7 +799,15 @@ async function startSession(userId, onUpdate) {
                     // chatJid (msg.key.remoteJid) = bot ගේ own JID (WRONG — never use)
                     const rawPartnerJid = storedMsg?._senderJid || proto.key.remoteJid || '';
                     deleterJid = rawPartnerJid.replace(/:\d+@/, '@');
-                    // @lid JIDs (WhatsApp privacy IDs) — use pushName instead
+
+                    // @lid JID resolve: sock.onWhatsApp() use කරලා real phone number lookup
+                    if (deleterJid.endsWith('@lid')) {
+                      try {
+                        const lidResults = await sock.onWhatsApp(deleterJid);
+                        if (lidResults?.[0]?.jid) deleterJid = lidResults[0].jid;
+                      } catch {}
+                    }
+
                     const partnerRaw = deleterJid.split('@')[0];
                     const isLid = deleterJid.endsWith('@lid');
                     const partnerDisplay = isLid
