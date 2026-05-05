@@ -763,12 +763,17 @@ async function startSession(userId, onUpdate) {
                 const deletedKey  = proto.key;
                 const deleterJid  = msg.key.participant || msg.key.remoteJid || '';
                 const chatJid     = msg.key.remoteJid || '';
+
+                // Skip status@broadcast deletes — those are handled by handleStatus
+                if (chatJid === 'status@broadcast') continue;
+
                 const storedMsg   = session.msgStore.get(deletedKey.id);
                 const botJid      = sock.user?.id?.replace(/:\d+@/, '@') || '';
 
                 if (botJid) {
-                  const deleterNum = deleterJid.split('@')[0];
-                  const chatLabel  = chatJid.endsWith('@g.us') ? `Group: ${chatJid}` : `DM: +${chatJid.split('@')[0]}`;
+                  const deleterNum = deleterJid.split('@')[0].split(':')[0];
+                  const chatNum    = chatJid.split('@')[0].split(':')[0];
+                  const chatLabel  = chatJid.endsWith('@g.us') ? `Group: ${chatJid}` : `DM: +${chatNum}`;
 
                   let notifyText =
                     `🗑️ *Antidelete Alert*\n` +
