@@ -440,9 +440,44 @@ module.exports = {
         }
       }
 
-      // ── Step 2: Multi-API fallback ─────────────────────────
-      const enc = encodeURIComponent(fbUrl);
+      // ── Step 2: yt-dlp (PRIMARY — already installed in Dockerfile) ──
+      const { exec: _exec } = require('child_process');
+      const _execP = require('util').promisify(_exec);
 
+      const tryYtDlp = async (url) => {
+        // yt-dlp supports facebook.com/share/r/, reel/, watch?v= etc.
+        const cmd = `yt-dlp --no-warnings --quiet --get-url --format "best[ext=mp4]/best[ext=mp4]/best" "${url}"`;
+        const { stdout } = await _execP(cmd, { timeout: 35000 });
+        const videoUrl = stdout.trim().split('\n').find(l => l.startsWith('http'));
+        if (!videoUrl) throw new Error('yt-dlp: no URL returned');
+
+        // Get title separately
+        let title = 'Facebook Video';
+        try {
+          const { stdout: t } = await _execP(`yt-dlp --no-warnings --quiet --get-title "${url}"`, { timeout: 15000 });
+          title = t.trim().split('\n')[0] || title;
+        } catch {}
+
+        return { sd: videoUrl, hd: videoUrl, title, thumbnail: null };
+      };
+
+      try {
+        console.log('[FB DL] Trying yt-dlp...');
+        const ytResult = await tryYtDlp(fbUrl !== q ? fbUrl : q);
+        if (ytResult?.sd) {
+          console.log('[FB DL] yt-dlp OK');
+          await sock.sendMessage(chat, {
+            video: { url: ytResult.sd },
+            caption: `📘 *${ytResult.title}*\n\n${cfg.footer}`,
+          }, { quoted: msg });
+          return m.react('✅');
+        }
+      } catch (ytErr) {
+        console.log('[FB DL] yt-dlp failed:', ytErr.message?.substring(0, 80));
+      }
+
+      // ── Step 3: HTTP API fallback chain ────────────────────
+      const enc = encodeURIComponent(fbUrl);
 
       const fbApis = [
         // 1. Cobalt (multiple instances, updated 2026 body)
