@@ -381,6 +381,39 @@ module.exports = {
       }
       await m.react('⏳');
 
+      // ── Resolve short/share/reel links → canonical URL ────────
+      // facebook.com/share/r/, fb.watch/, vm.tiktok etc. need redirect follow
+      let resolvedUrl = q;
+      if (/facebook\.com\/share\/|fb\.watch\/|facebook\.com\/reel\//.test(q)) {
+        try {
+          const headRes = await axios.get(q, {
+            maxRedirects: 10,
+            timeout: 12000,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+            validateStatus: () => true,
+          });
+          const finalUrl = headRes?.request?.res?.responseUrl || headRes?.config?.url || q;
+          if (finalUrl && finalUrl !== q && finalUrl.includes('facebook.com')) {
+            resolvedUrl = finalUrl;
+            console.log(`[FB DL] 🔗 Resolved: ${q} → ${resolvedUrl}`);
+          }
+          // Also try to extract video ID from HTML og:video tag
+          const html = typeof headRes?.data === 'string' ? headRes.data : '';
+          const ogVideo = html.match(/property="og:video:url"[^>]*content="([^"]+)"/)?.[1]
+            || html.match(/property="og:video"[^>]*content="([^"]+)"/)?.[1];
+          if (ogVideo) {
+            resolvedUrl = ogVideo.replace(/&amp;/g, '&');
+            console.log(`[FB DL] 🎯 og:video found: ${resolvedUrl.substring(0, 80)}`);
+          }
+        } catch (e) {
+          console.log(`[FB DL] ⚠️ URL resolve failed: ${e.message}`);
+        }
+      }
+      const q = resolvedUrl; // shadow outer q with resolved URL
+
       // ── Multi-API fallback (2026-05 refresh) ─────────────────
       const FB_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
