@@ -381,74 +381,58 @@ module.exports = {
       }
       await m.react('⏳');
 
-      // ── Resolve short/share/reel links → canonical URL ────────
-      // facebook.com/share/r/, fb.watch/, vm.tiktok etc. need redirect follow
-      let resolvedUrl = q;
-      if (/facebook\.com\/share\/|fb\.watch\/|facebook\.com\/reel\//.test(q)) {
-        try {
-          const headRes = await axios.get(q, {
-            maxRedirects: 10,
-            timeout: 12000,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-              'Accept-Language': 'en-US,en;q=0.9',
-            },
-            validateStatus: () => true,
-          });
-          const finalUrl = headRes?.request?.res?.responseUrl || headRes?.config?.url || q;
-          if (finalUrl && finalUrl !== q && finalUrl.includes('facebook.com')) {
-            resolvedUrl = finalUrl;
-            console.log(`[FB DL] 🔗 Resolved: ${q} → ${resolvedUrl}`);
-          }
-          // Also try to extract video ID from HTML og:video tag
-          const html = typeof headRes?.data === 'string' ? headRes.data : '';
-          const ogVideo = html.match(/property="og:video:url"[^>]*content="([^"]+)"/)?.[1]
-            || html.match(/property="og:video"[^>]*content="([^"]+)"/)?.[1];
-          if (ogVideo) {
-            resolvedUrl = ogVideo.replace(/&amp;/g, '&');
-            console.log(`[FB DL] 🎯 og:video found: ${resolvedUrl.substring(0, 80)}`);
-          }
-        } catch (e) {
-          console.log(`[FB DL] ⚠️ URL resolve failed: ${e.message}`);
-        }
-      }
-      const q = resolvedUrl; // shadow outer q with resolved URL
-
-      // ── Multi-API fallback (2026-05 refresh) ─────────────────
       const FB_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-      // ── Shared helper: verify a URL is actually a playable video ──
-      const verifyUrl = async (url) => {
-        if (!url || !url.startsWith('http')) return false;
-        try {
-          const h = await axios.head(url, { timeout: 8000, maxRedirects: 5 });
-          const ct = h.headers?.['content-type'] || '';
-          return ct.includes('video') || ct.includes('octet-stream') || ct.includes('mp4');
-        } catch { return true; } // assume ok if HEAD fails
-      };
+      // ── Step 1: Resolve short/share/reel links ─────────────
+      let fbUrl = q;
+      try {
+        const res0 = await axios.get(q, {
+          maxRedirects: 10,
+          timeout: 12000,
+          headers: { 'User-Agent': FB_UA, 'Accept-Language': 'en-US,en;q=0.9' },
+          validateStatus: () => true,
+        });
+        // Get final redirect URL
+        const rUrl = res0?.request?.res?.responseUrl
+          || res0?.request?.responseURL
+          || res0?.config?.url
+          || q;
+        if (rUrl && rUrl.includes('facebook.com') && rUrl !== q) {
+          fbUrl = rUrl.split('?')[0]; // strip tracking params
+          console.log(`[FB DL] 🔗 Resolved → ${fbUrl}`);
+        }
+        // Try og:video direct CDN URL from HTML
+        const html = typeof res0?.data === 'string' ? res0.data.substring(0, 50000) : '';
+        const ogVid = html.match(/property="og:video:secure_url"[^>]*content="([^"]+)"/)?.[1]
+          || html.match(/property="og:video:url"[^>]*content="([^"]+)"/)?.[1]
+          || html.match(/property="og:video"[^>]*content="([^"]+)"/)?.[1];
+        if (ogVid && ogVid.includes('.mp4')) {
+          const directUrl = ogVid.replace(/&amp;/g, '&');
+          console.log(`[FB DL] 🎯 og:video CDN hit`);
+          await sock.sendMessage(chat, {
+            video: { url: directUrl },
+            caption: `📘 *Facebook Video*\n\n${cfg.footer}`,
+          }, { quoted: msg });
+          return m.react('✅');
+        }
+      } catch (e) {
+        console.log(`[FB DL] ⚠️ Resolve: ${e.message?.substring(0, 60)}`);
+      }
+
+      // ── Step 2: Multi-API fallback ─────────────────────────
+      const enc = encodeURIComponent(fbUrl);
 
       const fbApis = [
-        // 1. Cobalt — try multiple instances (updated 2026 format)
+        // 1. Cobalt (multiple instances, updated 2026 body)
         async () => {
-          const instances = [
-            'https://api.cobalt.tools',
-            'https://cobalt.oisd.nl',
-            'https://cobalt.catvibers.me',
-            'https://co.wuk.sh',
-          ];
+          const instances = ['https://api.cobalt.tools', 'https://cobalt.oisd.nl', 'https://cobalt.catvibers.me', 'https://co.wuk.sh'];
           for (const inst of instances) {
             try {
               const r = await axios.post(`${inst}/`, {
-                url: q,
-                videoQuality: '720',
-                downloadMode: 'auto',
-                filenameStyle: 'pretty',
-              }, {
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                timeout: 18000,
-              });
-              const url = r?.data?.url || r?.data?.tunnel;
-              if (url) return { sd: url, hd: url, title: 'Facebook Video', thumbnail: null };
+                url: fbUrl, videoQuality: '720', downloadMode: 'auto', filenameStyle: 'pretty',
+              }, { headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, timeout: 15000 });
+              const vUrl = r?.data?.url || r?.data?.tunnel;
+              if (vUrl) return { sd: vUrl, hd: vUrl, title: 'Facebook Video', thumbnail: null };
             } catch {}
           }
           throw new Error('cobalt: all instances failed');
@@ -456,7 +440,7 @@ module.exports = {
 
         // 2. SaveVid
         async () => {
-          const r = await axios.post('https://savevid.net/api/ajaxSearch', new URLSearchParams({ q, lang: 'en' }), {
+          const r = await axios.post('https://savevid.net/api/ajaxSearch', new URLSearchParams({ q: fbUrl, lang: 'en' }), {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': 'https://savevid.net/', 'User-Agent': FB_UA },
             timeout: 20000,
           });
@@ -468,113 +452,97 @@ module.exports = {
           return { sd: url, hd: hd || url, title: 'Facebook Video', thumbnail: null };
         },
 
-        // 3. Snapsave (updated payload)
+        // 3. Snapsave
         async () => {
-          const r = await axios.post('https://snapsave.app/action.php', new URLSearchParams({ url: q }), {
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'Referer': 'https://snapsave.app/',
-              'User-Agent': FB_UA,
-              'Origin': 'https://snapsave.app',
-            },
+          const r = await axios.post('https://snapsave.app/action.php', new URLSearchParams({ url: fbUrl }), {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': 'https://snapsave.app/', 'User-Agent': FB_UA, 'Origin': 'https://snapsave.app' },
             timeout: 20000,
           });
           const html = r?.data || '';
-          const hd = html.match(/download_btn[^>]*href="(https:\/\/[^"]+)"[^>]*>HD/)?.[1]
-            || html.match(/href="(https:\/\/video[^"]+\.mp4[^"]*)"/)?.[1];
+          const hd = html.match(/href="(https:\/\/video[^"]+\.mp4[^"]*)"/)?.[1];
           const sd = html.match(/href="(https:\/\/[^"]+\.mp4[^"]*)"/)?.[1];
           const url = hd || sd;
           if (!url) throw new Error('no url');
           return { sd: url, hd: hd || url, title: 'Facebook Video', thumbnail: null };
         },
 
-        // 4. Getfvid (HTML scrape)
+        // 4. Getfvid
         async () => {
-          const r = await axios.post('https://www.getfvid.com/downloader', new URLSearchParams({ url: q }), {
+          const r = await axios.post('https://www.getfvid.com/downloader', new URLSearchParams({ url: fbUrl }), {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': 'https://www.getfvid.com/', 'User-Agent': FB_UA },
             timeout: 20000,
           });
           const html = r?.data || '';
           const hd = html.match(/href="(https:\/\/[^"]+)"[^>]*>HD/)?.[1];
-          const sd = html.match(/href="(https:\/\/[^"]+)"[^>]*>SD/)?.[1] || html.match(/href="(https:\/\/[^"]+\.mp4[^"]*)"/)?.[1];
+          const sd = html.match(/href="(https:\/\/[^"]+\.mp4[^"]*)"/)?.[1];
           const url = hd || sd;
           if (!url) throw new Error('no url');
           return { sd: url, hd: hd || url, title: 'Facebook Video', thumbnail: null };
         },
 
-        // 5. Fdown.net (updated regex)
+        // 5. Fdown.net
         async () => {
-          const r = await axios.post('https://fdown.net/download.php', new URLSearchParams({ URLz: q }), {
+          const r = await axios.post('https://fdown.net/download.php', new URLSearchParams({ URLz: fbUrl }), {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': 'https://fdown.net/', 'User-Agent': FB_UA },
             timeout: 20000,
           });
           const html = r?.data || '';
-          const hd = html.match(/id="hdlink"[^>]*href="([^"]+)"/)?.[1]
-            || html.match(/href="([^"]+)"[^>]*>.*?Normal Quality/s)?.[1];
-          const sd = html.match(/id="sdlink"[^>]*href="([^"]+)"/)?.[1]
-            || html.match(/href="(https:\/\/[^"]+\.mp4[^"]*)"/)?.[1];
+          const hd = html.match(/id="hdlink"[^>]*href="([^"]+)"/)?.[1];
+          const sd = html.match(/id="sdlink"[^>]*href="([^"]+)"/)?.[1] || html.match(/href="(https:\/\/[^"]+\.mp4[^"]*)"/)?.[1];
           const url = hd || sd;
           if (!url) throw new Error('no url');
           return { sd: url, hd: hd || url, title: 'Facebook Video', thumbnail: null };
         },
 
-        // 6. Loco Downloader
+        // 6. SaveFrom worker
         async () => {
-          const r = await axios.post('https://locodownloader.com/api/single/autolink', new URLSearchParams({ url: q }), {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': 'https://locodownloader.com/', 'User-Agent': FB_UA },
-            timeout: 20000,
-          });
-          const d = r?.data;
-          const links = d?.data?.links || d?.links || [];
-          const hd = links.find(l => l.quality === 'HD' || l.label?.includes('HD'))?.url;
-          const sd = links.find(l => l.quality === 'SD' || l.label?.includes('SD'))?.url || links[0]?.url;
-          if (!sd) throw new Error('no url');
-          return { sd, hd: hd || sd, title: d?.data?.title || 'Facebook Video', thumbnail: d?.data?.thumbnail || null };
-        },
-
-        // 7. Y2mate-style FB
-        async () => {
-          const r1 = await axios.post('https://www.y2mate.com/mates/analyzeV2/ajax', new URLSearchParams({ k_query: q, k_page: 'Facebook', hl: 'en', q_auto: 0 }), {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': 'https://www.y2mate.com/', 'User-Agent': FB_UA },
-            timeout: 20000,
-          });
-          const vid = r1?.data?.vid;
-          const kId = r1?.data?.links?.mp4?.['137']?.k || r1?.data?.links?.mp4?.['136']?.k || r1?.data?.links?.mp4?.[Object.keys(r1?.data?.links?.mp4||{})[0]]?.k;
-          if (!vid || !kId) throw new Error('no vid/key');
-          const r2 = await axios.post('https://www.y2mate.com/mates/convertV2/index', new URLSearchParams({ vid, k: kId }), {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': 'https://www.y2mate.com/', 'User-Agent': FB_UA },
-            timeout: 20000,
-          });
-          const url = r2?.data?.dlink;
-          if (!url) throw new Error('no dlink');
-          return { sd: url, hd: url, title: r1?.data?.title || 'Facebook Video', thumbnail: null };
-        },
-
-        // 8. SaveFrom (net)
-        async () => {
-          const r = await axios.get(`https://worker.sf-tools.com/savefrom.php?sf_url=${encodeURIComponent(q)}&lang=en`, {
+          const r = await axios.get(`https://worker.sf-tools.com/savefrom.php?sf_url=${enc}&lang=en`, {
             headers: { 'User-Agent': FB_UA, 'Referer': 'https://en.savefrom.net/' },
             timeout: 20000,
           });
           const d = r?.data;
           const links = d?.[0]?.url || [];
-          const hd = links.find(l => l?.type?.includes('mp4') && (l?.id?.includes('hd') || parseInt(l?.id) >= 720))?.url;
+          const hd = links.find(l => l?.type?.includes('mp4') && parseInt(l?.id) >= 720)?.url;
           const sd = links.find(l => l?.type?.includes('mp4'))?.url;
           const url = hd || sd;
           if (!url) throw new Error('no url');
           return { sd: url, hd: hd || url, title: d?.[0]?.title || 'Facebook Video', thumbnail: d?.[0]?.thumb || null };
         },
+
+        // 7. SnapTik (fb support)
+        async () => {
+          const r = await axios.post('https://snaptik.app/action2.php', new URLSearchParams({ url: fbUrl, lang: 'en' }), {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': 'https://snaptik.app/', 'User-Agent': FB_UA },
+            timeout: 20000,
+          });
+          const html = r?.data?.data || r?.data || '';
+          const url = html.match(/href="(https:\/\/[^"]+\.mp4[^"]*)"/)?.[1];
+          if (!url) throw new Error('no url');
+          return { sd: url, hd: url, title: 'Facebook Video', thumbnail: null };
+        },
+
+        // 8. LocoDownloader
+        async () => {
+          const r = await axios.post('https://locodownloader.com/api/single/autolink', new URLSearchParams({ url: fbUrl }), {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': 'https://locodownloader.com/', 'User-Agent': FB_UA },
+            timeout: 20000,
+          });
+          const links = r?.data?.data?.links || r?.data?.links || [];
+          const hd = links.find(l => l.quality === 'HD' || l.label?.includes('HD'))?.url;
+          const sd = links.find(l => l.quality === 'SD')?.url || links[0]?.url;
+          if (!sd) throw new Error('no url');
+          return { sd, hd: hd || sd, title: r?.data?.data?.title || 'Facebook Video', thumbnail: r?.data?.data?.thumbnail || null };
+        },
       ];
 
+      const apiNames = ['Cobalt', 'SaveVid', 'Snapsave', 'Getfvid', 'Fdown', 'SaveFrom', 'SnapTik', 'LocoDownloader'];
       let fbData = null;
       let usedApi = 'unknown';
-      const apiNames = ['Cobalt', 'SaveVid', 'Snapsave', 'Getfvid', 'Fdown', 'LocoDownloader', 'Y2mate', 'SaveFrom'];
 
       for (let i = 0; i < fbApis.length; i++) {
         try {
           const result = await fbApis[i]();
-          const url = result?.sd || result?.hd;
-          if (url) {
+          if (result?.sd || result?.hd) {
             fbData = result;
             usedApi = apiNames[i] || `API${i + 1}`;
             console.log(`[FB DL] ✅ ${usedApi}`);
@@ -628,10 +596,10 @@ module.exports = {
           sock.ev.off('messages.upsert', listener);
         } else if (repText === '2.3') {
           try {
-            const _axDlEx = require('axios');
-            const _arEx   = await _axDlEx.get(sd, { responseType: 'arraybuffer', timeout: 20000 });
-            await sock.sendMessage(chat, { audio: Buffer.from(_arEx.data), mimetype: 'audio/mpeg', ptt: true }, { quoted: reply });
-          } catch (_eEx) {
+            const _ax = require('axios');
+            const _ar = await _ax.get(sd, { responseType: 'arraybuffer', timeout: 20000 });
+            await sock.sendMessage(chat, { audio: Buffer.from(_ar.data), mimetype: 'audio/mpeg', ptt: true }, { quoted: reply });
+          } catch {
             await sock.sendMessage(chat, { audio: { url: sd }, mimetype: 'audio/mpeg', ptt: true }, { quoted: reply });
           }
           sock.ev.off('messages.upsert', listener);
