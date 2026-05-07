@@ -45,9 +45,9 @@ const messageStore = new Map();
 const msgRetryCounterCache = new NodeCache();
 let sock = null;
 let retryCount      = 0;
-const MAX_RETRIES   = 10;           // give up after 10 consecutive fails
-const BASE_DELAY_MS = 3_000;        // 3s first retry
-const MAX_DELAY_MS  = 300_000;      // cap at 5 min
+const MAX_RETRIES   = 9999;         // never give up — Railway restarts constantly
+const BASE_DELAY_MS = 2_000;        // 2s first retry
+const MAX_DELAY_MS  = 30_000;       // cap at 30s (not 5min — Railway needs fast recovery)
 
 function getReconnectDelay() {
   // Exponential backoff with jitter: 3s, 6s, 12s … up to 5min
@@ -59,13 +59,16 @@ function getReconnectDelay() {
 
 function safeReconnect(label = '') {
   retryCount++;
-  if (retryCount > MAX_RETRIES) {
-    console.error(chalk.red(`[CONN] ${MAX_RETRIES} consecutive reconnect failures — stopping to protect session.`));
-    console.error(chalk.red('[CONN] Restart the process manually.'));
+  // After 15 consecutive fails, reset counter + wait 10s and try fresh
+  // Never fully stop — Railway env requires persistent reconnect
+  if (retryCount > 15) {
+    console.log(chalk.yellow(`[CONN] ${retryCount} retries — resetting backoff and trying fresh in 10s...`));
+    retryCount = 0;
+    setTimeout(() => connectToWhatsApp(), 10_000);
     return;
   }
   const delay = getReconnectDelay();
-  console.log(chalk.yellow(`[CONN] ${label} — retry ${retryCount}/${MAX_RETRIES} in ${Math.round(delay/1000)}s`));
+  console.log(chalk.yellow(`[CONN] ${label} — retry ${retryCount} in ${Math.round(delay/1000)}s`));
   setTimeout(() => connectToWhatsApp(), delay);
 }
 let pairingStarted = false;
@@ -257,12 +260,15 @@ async function connectToWhatsApp() {
           retryCount = 0;
           setTimeout(() => connectToWhatsApp(), 60000);
         } else if (reason === DisconnectReason.forbidden) {
-          console.log(chalk.red('❌ Forbidden — waiting 5min before reconnect...'));
+          console.log(chalk.red('❌ Forbidden — waiting 30s before reconnect...'));
           retryCount = 0;
-          setTimeout(() => connectToWhatsApp(), 300000);
+          setTimeout(() => connectToWhatsApp(), 30_000);
         } else if (reason === DisconnectReason.multideviceMismatch) {
+          retryCount = 0;
           safeReconnect('Multi-device mismatch');
         } else {
+          // Unknown reason — reset counter and reconnect fresh
+          retryCount = 0;
           safeReconnect(`Unknown (${reason})`);
         }
         return;
@@ -489,9 +495,13 @@ main();
 
 process.on('uncaughtException', e => {
   console.error(chalk.red('[UNCAUGHT]'), e.message);
-  // Don't exit — let reconnect logic handle recovery
+  // If sock is dead, try reconnect after 5s
+  if (!sock || !global.unitySock) {
+    console.log(chalk.yellow('[UNCAUGHT] Socket appears dead — attempting reconnect in 5s...'));
+    retryCount = 0;
+    setTimeout(() => connectToWhatsApp(), 5_000);
+  }
 });
 process.on('unhandledRejection', e => {
   console.error(chalk.red('[UNHANDLED]'), e?.message || e);
-  // Don't exit — log and continue
 });
