@@ -116,6 +116,9 @@ function checkRateLimit(ip, num) {
   return { blocked: false };
 }
 
+// ── MOBILE APP API ────────────────────────────────────────────
+app.use("/api/app", require("./routes/appApi"));
+
 // ── PAIR: Submit number → get pair code ───────────────────────
 app.post('/api/pair', async (req, res) => {
   const userId = (req.body.number || '').replace(/[^0-9]/g, '');
