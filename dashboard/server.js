@@ -589,6 +589,34 @@ app.get('/api/app/chat/messages/:phone', async (req, res) => {
 });
 
 
+// ── Audio stream endpoint for app chat voice notes ──────────
+app.get('/api/app/chat/audio/:phone/:msgId', async (req, res) => {
+  const phone = req.params.phone.replace(/[^0-9]/g, '');
+  const msgId = req.params.msgId;
+  if (!phone || !msgId) return res.status(400).json({ ok: false, error: 'Invalid params' });
+  if (!_sm) return res.status(503).json({ ok: false, error: 'Server not ready' });
+
+  try {
+    const rawMsg = global._appChatRawMsgs?.[phone]?.[msgId];
+    if (!rawMsg) return res.status(404).json({ ok: false, error: 'Audio not found' });
+
+    const sess = _sm.getSession(phone);
+    const sock = sess?.sock;
+    if (!sock || sess.status !== 'connected') {
+      return res.status(503).json({ ok: false, error: 'Bot not connected' });
+    }
+
+    const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+    const buffer = await downloadMediaMessage(rawMsg, 'buffer', {}, { logger: require('../src/commands/logger'), reuploadRequest: sock.updateMediaMessage });
+
+    res.set('Content-Type', 'audio/ogg; codecs=opus');
+    res.set('Content-Disposition', 'inline');
+    res.send(buffer);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── UNITY-MD Flutter App API (/api/app/*) ────────────────────
 // ════════════════════════════════════════════════════════════════
 
