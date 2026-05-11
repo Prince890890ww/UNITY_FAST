@@ -481,6 +481,114 @@ app.get('/pair', (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════
+// ── UNITY-MD App Chat API (/api/app/chat/*) ──────────────────
+// ════════════════════════════════════════════════════════════════
+
+// Setup: create/get the app chat group for this user
+app.post('/api/app/chat/setup', async (req, res) => {
+  const phone = (req.body.phone || '').replace(/[^0-9]/g, '');
+  if (!phone) return res.status(400).json({ ok: false, error: 'Invalid phone' });
+  if (!_sm)   return res.status(503).json({ ok: false, error: 'Server not ready' });
+
+  try {
+    const sess = _sm.getSession(phone);
+    const sock = sess?.sock;
+    if (!sock || sess.status !== 'connected') {
+      return res.status(503).json({ ok: false, error: 'Bot not connected' });
+    }
+
+    const botCfg = await db.getBotConfig(phone);
+
+    // Already have a group — return it
+    if (botCfg.appChatJid) {
+      return res.json({ ok: true, jid: botCfg.appChatJid });
+    }
+
+    // Create new group
+    const selfJid  = sock.user?.id?.replace(/:[0-9]+@/, '@') || phone + '@s.whatsapp.net';
+    const created  = await sock.groupCreate('UNITY-MD Bot Chat', [selfJid]);
+    const groupJid = created.id;
+
+    // Save to config
+    botCfg.appChatJid = groupJid;
+    await botCfg.save();
+
+    // Send welcome message
+    await sock.sendMessage(groupJid, {
+      text: '🤖 *UNITY-MD App Chat*
+
+This chat is linked to your UNITY-MD app.
+
+✅ Startup messages & voice notes will appear here.
+💬 You can also send messages to the bot from here.',
+    }).catch(() => {});
+
+    res.json({ ok: true, jid: groupJid });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Get chat JID
+app.get('/api/app/chat/jid/:phone', async (req, res) => {
+  const phone = req.params.phone.replace(/[^0-9]/g, '');
+  if (!phone) return res.status(400).json({ ok: false, error: 'Invalid phone' });
+  try {
+    const botCfg = await db.getBotConfig(phone);
+    res.json({ ok: true, jid: botCfg.appChatJid || null });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Send message from app to bot chat
+app.post('/api/app/chat/send', async (req, res) => {
+  const phone = (req.body.phone || '').replace(/[^0-9]/g, '');
+  const text  = (req.body.text  || '').trim();
+  if (!phone || !text) return res.status(400).json({ ok: false, error: 'Missing phone or text' });
+  if (!_sm) return res.status(503).json({ ok: false, error: 'Server not ready' });
+
+  try {
+    const sess = _sm.getSession(phone);
+    const sock = sess?.sock;
+    if (!sock || sess.status !== 'connected') {
+      return res.status(503).json({ ok: false, error: 'Bot not connected' });
+    }
+
+    const botCfg = await db.getBotConfig(phone);
+    if (!botCfg.appChatJid) {
+      return res.status(404).json({ ok: false, error: 'App chat not set up yet' });
+    }
+
+    await sock.sendMessage(botCfg.appChatJid, { text });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Get recent messages from app chat (last 30)
+app.get('/api/app/chat/messages/:phone', async (req, res) => {
+  const phone = req.params.phone.replace(/[^0-9]/g, '');
+  if (!phone) return res.status(400).json({ ok: false, error: 'Invalid phone' });
+  if (!_sm)   return res.status(503).json({ ok: false, error: 'Server not ready' });
+
+  try {
+    const botCfg = await db.getBotConfig(phone);
+    if (!botCfg.appChatJid) {
+      return res.json({ ok: true, messages: [], jid: null });
+    }
+
+    // Get messages from in-memory store
+    const jid  = botCfg.appChatJid;
+    const msgs = global._appChatMsgs?.[phone] || [];
+    res.json({ ok: true, messages: msgs.slice(-30), jid });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+
 // ── UNITY-MD Flutter App API (/api/app/*) ────────────────────
 // ════════════════════════════════════════════════════════════════
 
