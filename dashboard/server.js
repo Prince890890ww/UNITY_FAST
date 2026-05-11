@@ -515,12 +515,12 @@ app.post('/api/app/chat/setup', async (req, res) => {
 
     // Send welcome message
     await sock.sendMessage(groupJid, {
-      text: '🤖 *UNITY-MD App Chat*
+      text: `🤖 *UNITY-MD App Chat*
 
 This chat is linked to your UNITY-MD app.
 
 ✅ Startup messages & voice notes will appear here.
-💬 You can also send messages to the bot from here.',
+💬 You can also send messages to the bot from here.`,
     }).catch(() => {});
 
     res.json({ ok: true, jid: groupJid });
