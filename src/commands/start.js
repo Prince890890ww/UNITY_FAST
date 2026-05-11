@@ -432,23 +432,32 @@ async function connectToWhatsApp() {
       for (const msg of messages) {
         if (!msg.message) continue;
 
-        // ── App chat message store ───────────────────────────────
+        // ── App chat message store (ALL messages to/from appChat) ──
         try {
           const _botCfgForChat = await require('./src/commands/index').getBotConfig(num);
           const _appChatJid    = _botCfgForChat?.appChatJid;
           if (_appChatJid && msg.key.remoteJid === _appChatJid) {
             if (!global._appChatMsgs) global._appChatMsgs = {};
             if (!global._appChatMsgs[num]) global._appChatMsgs[num] = [];
+            // Skip duplicates
+            if (global._appChatMsgs[num].some(m => m.id === msg.key.id)) continue;
             const _body = msg.message?.conversation
               || msg.message?.extendedTextMessage?.text
               || msg.message?.imageMessage?.caption
+              || msg.message?.videoMessage?.caption
               || (msg.message?.audioMessage ? '🎵 Voice Note' : null)
               || (msg.message?.ptvMessage   ? '🎵 Voice Note' : null)
               || '[message]';
             const _isAudio = !!(msg.message?.audioMessage || msg.message?.ptvMessage);
+            // fromMe=true → user sent (right side), fromMe=false → bot reply (left side)
+            // BUT bot replies to group go as fromMe=true from bot's perspective
+            // participant = null means bot sent it; participant = selfJid means user sent
+            const _participant = msg.key.participant || '';
+            const _botJid = (sock.user?.id || '').replace(/:\d+@/, '@');
+            const _isFromBot = msg.key.fromMe && (!_participant || _participant === _botJid);
             global._appChatMsgs[num].push({
               id:       msg.key.id,
-              fromMe:   msg.key.fromMe,
+              fromMe:   !_isFromBot,   // bot reply = left side (fromMe:false in UI)
               text:     _body,
               type:     _isAudio ? 'audio' : 'text',
               audioUrl: _isAudio ? `/api/app/chat/audio/${num}/${msg.key.id}` : null,
