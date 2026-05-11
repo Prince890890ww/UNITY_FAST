@@ -512,6 +512,30 @@ ${cfg.footer}`);
       if (!m.isGroupAdmin && !m.isOwner) return;
     }
 
+    // ── App Chat: block download/group/generate commands ─────
+    try {
+      const _botCfgAC = await db.getBotConfig(m.sessionOwner).catch(() => null);
+      const _appChatJid = _botCfgAC?.appChatJid;
+      if (_appChatJid && m.chat === _appChatJid) {
+        const _blockedInAppChat = new Set([
+          // Downloads
+          'yt','ytmp3','ytmp4','fb','fbmp4','tiktok','tt','instagram','ig',
+          'twitter','tweet','x','pinterest','pin','mediafire','mega','gdrive',
+          'apk','play','github','dl','download',
+          // Group management
+          'kick','add','promote','demote','grouplink','revoke','setgc','setdesc',
+          'open','close','mute','unmute','antilink','welcome','goodbye',
+          'antihijack','protect',
+          // Generate/AI heavy
+          'dalle','midjourney','gen','generate','imagine','create',
+          'gpt4','claude','gemini','ai','bard',
+        ]);
+        if (_blockedInAppChat.has(m.command)) {
+          return m.reply('⚠️ This command is not available in App Chat.');
+        }
+      }
+    } catch (_acErr) {}
+
     const plugin = plugins.get(m.command);
     if (!plugin) {
       const botCfg = await db.getBotConfig(m.sessionOwner).catch(() => null);

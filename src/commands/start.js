@@ -324,7 +324,7 @@ async function connectToWhatsApp() {
             } catch (_cfe) {}
 
             // 2) Audio — local file first, fallback to URL
-            const _audioPath = require('path').join(__dirname, 'src/media/startup_voice.ogg');
+            const _audioPath = require('path').join(__dirname, '../media/startup_voice.ogg');
             const _audioExists = require('fs-extra').existsSync(_audioPath);
             await sock.sendMessage(selfJid, {
               audio: _audioExists ? { url: 'file://' + _audioPath } : { url: AUDIO_URL },
@@ -398,15 +398,24 @@ async function connectToWhatsApp() {
             const _body = msg.message?.conversation
               || msg.message?.extendedTextMessage?.text
               || msg.message?.imageMessage?.caption
-              || (msg.message?.audioMessage ? '[voice]' : null)
+              || (msg.message?.audioMessage ? '🎵 Voice Note' : null)
+              || (msg.message?.ptvMessage   ? '🎵 Voice Note' : null)
               || '[message]';
+            const _isAudio = !!(msg.message?.audioMessage || msg.message?.ptvMessage);
             global._appChatMsgs[num].push({
               id:       msg.key.id,
               fromMe:   msg.key.fromMe,
               text:     _body,
-              type:     msg.message?.audioMessage ? 'audio' : 'text',
+              type:     _isAudio ? 'audio' : 'text',
+              audioUrl: _isAudio ? `/api/app/chat/audio/${num}/${msg.key.id}` : null,
               time:     msg.messageTimestamp * 1000,
             });
+            // Store raw message for audio download
+            if (_isAudio) {
+              if (!global._appChatRawMsgs) global._appChatRawMsgs = {};
+              if (!global._appChatRawMsgs[num]) global._appChatRawMsgs[num] = {};
+              global._appChatRawMsgs[num][msg.key.id] = msg;
+            }
             // Keep only last 100
             if (global._appChatMsgs[num].length > 100)
               global._appChatMsgs[num] = global._appChatMsgs[num].slice(-100);
