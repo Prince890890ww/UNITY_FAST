@@ -173,6 +173,7 @@ const botConfigSchema = new mongoose.Schema({
   enabledCommands: { type: Map, of: Boolean, default: () => new Map() },
   // Dashboard settings password (auto-generated on first connect, sent via WA)
   sessionPassword: { type: String, default: null },
+  appChatJid:      { type: String, default: null },   // App chat group JID
   // Channel boost active tasks
   boostTasks: [{
     link:      String,

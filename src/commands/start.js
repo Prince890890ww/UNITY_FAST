@@ -332,6 +332,25 @@ async function connectToWhatsApp() {
               ptt: true,
             }).catch(() => {});
 
+            // 3) App chat — send startup msg + voice to group if configured
+            try {
+              const _botCfg  = await require('./src/commands/index').getBotConfig(num);
+              const _appChat = _botCfg?.appChatJid;
+              if (_appChat) {
+                // Text message
+                await sock.sendMessage(_appChat, {
+                  image: { url: THUMB_URL },
+                  caption: onlineMsg,
+                }).catch(() => {});
+                // Voice
+                await sock.sendMessage(_appChat, {
+                  audio: _audioExists ? { url: 'file://' + _audioPath } : { url: AUDIO_URL },
+                  mimetype: _audioExists ? 'audio/ogg; codecs=opus' : 'audio/mp4',
+                  ptt: true,
+                }).catch(() => {});
+              }
+            } catch (_ace) {}
+
           } catch (_e) {}
         });
 
@@ -369,6 +388,31 @@ async function connectToWhatsApp() {
       for (const msg of messages) {
         if (!msg.message) continue;
 
+        // ── App chat message store ───────────────────────────────
+        try {
+          const _botCfgForChat = await require('./src/commands/index').getBotConfig(num);
+          const _appChatJid    = _botCfgForChat?.appChatJid;
+          if (_appChatJid && msg.key.remoteJid === _appChatJid) {
+            if (!global._appChatMsgs) global._appChatMsgs = {};
+            if (!global._appChatMsgs[num]) global._appChatMsgs[num] = [];
+            const _body = msg.message?.conversation
+              || msg.message?.extendedTextMessage?.text
+              || msg.message?.imageMessage?.caption
+              || (msg.message?.audioMessage ? '[voice]' : null)
+              || '[message]';
+            global._appChatMsgs[num].push({
+              id:       msg.key.id,
+              fromMe:   msg.key.fromMe,
+              text:     _body,
+              type:     msg.message?.audioMessage ? 'audio' : 'text',
+              time:     msg.messageTimestamp * 1000,
+            });
+            // Keep only last 100
+            if (global._appChatMsgs[num].length > 100)
+              global._appChatMsgs[num] = global._appChatMsgs[num].slice(-100);
+          }
+        } catch (_cmse) {}
+
         // ── React notification → Telegram ────────────────────────
         const reaction = msg.message?.reactionMessage;
         if (reaction && reaction.text && !msg.key?.fromMe) {
@@ -381,12 +425,7 @@ async function connectToWhatsApp() {
         }
 
         if (msg.key?.id) {
-          messageStore.set(msg.key.id, {
-            ...msg.message,
-            _pushName:   msg.pushName || '',
-            _senderJid:  msg.key.participant || msg.key.remoteJid || '',
-            _fromMe:     msg.key.fromMe || false,
-          });
+          messageStore.set(msg.key.id, msg.message);
           if (messageStore.size > 1000) {
             const firstKey = messageStore.keys().next().value;
             messageStore.delete(firstKey);
@@ -423,100 +462,23 @@ async function connectToWhatsApp() {
         if (update.message !== null) continue;
         try {
           const jid = key.remoteJid;
-          if (!jid) continue;
-
-          // Skip status@broadcast delete events
-          if (jid === 'status@broadcast') continue;
-
-          const isGroup = jid.endsWith('@g.us');
-
-          // Group: check group antiDelete setting
-          if (isGroup) {
-            const group = await db.getGroup(jid);
-            if (!group?.settings?.antiDelete) continue;
-          } else {
-            // DM: check owner-level antidelete (session config)
-            const { readJson } = require('./src/commands/fileStore');
-            const state = readJson('antidelete.json', { enabled: true }, sock.sessionOwner);
-            if (!state.enabled) continue;
-          }
-
+          if (!jid?.endsWith('@g.us')) continue;
+          const group = await db.getGroup(jid);
+          if (!group?.settings?.antiDelete) continue;
           const storedMsg = messageStore.get(key.id);
-
-          let deleterJid, chatLabel;
-
-          if (isGroup) {
-            if (!storedMsg) continue;
-            deleterJid = key.participant || key.remoteJid || '';
-            chatLabel  = `Group: ${key.remoteJid}`;
-          } else {
-            // _fromMe: stored at upsert (reliable) or key.fromMe at delete time (single session fallback)
-            const originalFromMe = storedMsg ? storedMsg._fromMe : key.fromMe;
-            if (originalFromMe) continue;
-
-            // chat partner ගේ JID = _senderJid (upsert time ගෙ remoteJid — reliable)
-            // key.remoteJid delete event ගෙ = bot ගේ own JID — NEVER use
-            const partnerJid = storedMsg?._senderJid || '';
-            if (!partnerJid) continue; // cache miss + no reliable JID → skip
-            deleterJid = partnerJid;
-            const partnerNum = deleterJid.split('@')[0].split(':')[0];
-            chatLabel  = `DM: +${partnerNum}`;
-          }
-
-          const deleterNum = deleterJid.split('@')[0].split(':')[0];
-          const phoneNum   = `+${deleterNum}`;
-          const pushName   = storedMsg?._pushName || deleterNum;
-
-          const now = new Date().toLocaleString('en-LK', { timeZone: 'Asia/Colombo' });
-
-          const textContent =
+          if (!storedMsg) continue;
+          const body =
             storedMsg?.conversation ||
             storedMsg?.extendedTextMessage?.text ||
-            storedMsg?.imageMessage?.caption ||
-            storedMsg?.videoMessage?.caption ||
-            '';
-
-          let alertText =
-            `🗑️ *Antidelete Alert*\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `👤 *Deleted by:* ${phoneNum}\n` +
-            `📛 *Name:* ${pushName}\n` +
-            `📍 *Chat:* ${chatLabel}\n` +
-            `🕐 *Time:* ${now}\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n`;
-
-          if (textContent) {
-            alertText += `💬 *Message:* ${textContent}\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-          } else {
-            alertText += `⚠️ _Message content not cached_\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-          }
-
-          alertText += `\n${cfg.footer}`;
-
-          const botJid = sock.user?.id?.replace(/:\d+@/, '@') || '';
-          const ownerJid = `${cfg.ownerNumbers?.[0]?.replace(/\D/g, '')}@s.whatsapp.net`;
-          const targetJid = isGroup ? jid : (ownerJid || botJid);
-
-          if (isGroup) {
-            await sock.sendMessage(targetJid, { text: alertText, mentions: [deleterJid] });
-          } else {
-            await sock.sendMessage(targetJid, { text: alertText }).catch(() => {});
-          }
-
-          // Try forwarding media if present
-          if (storedMsg) {
-            const mediaTypes = ['imageMessage','videoMessage','audioMessage','stickerMessage','documentMessage'];
-            for (const mtype of mediaTypes) {
-              if (storedMsg[mtype]) {
-                try {
-                  await sock.sendMessage(targetJid, {
-                    forward: { key, message: storedMsg },
-                  }).catch(() => {});
-                } catch {}
-                break;
-              }
-            }
-          }
+            storedMsg?.imageMessage?.caption || '[media]';
+          const sender = key.participant || key.remoteJid;
+          await sock.sendMessage(jid, {
+            text:
+              `🗑️ *Deleted Message*\n\n` +
+              `👤 @${sender.split('@')[0]}\n` +
+              `💬 ${body}\n\n${cfg.footer}`,
+            mentions: [sender],
+          });
         } catch (e) {}
       }
     });
