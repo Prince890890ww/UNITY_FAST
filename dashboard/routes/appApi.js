@@ -141,4 +141,112 @@ router.get('/bot/info/:phone', appAuth, async (req, res) => {
 // ── GET /api/app/ping ─────────────────────────────────────────
 router.get('/ping', (_, res) => res.json({ ok: true, server: 'UNITY-MD', ts: Date.now() }));
 
+// ── POST /api/app/restart ─────────────────────────────────────
+// App restart button → bot reconnects → startup msg + audio fires
+router.post('/restart', appAuth, async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ ok: false, error: 'phone required' });
+
+    const userId = buildUserId(req.appUser.uid, normalizePhone(phone));
+    const sm     = getSM();
+
+    // Stop existing session then restart — triggers connection.open → startup msg
+    await sm.stopSession(userId).catch(() => {});
+    setTimeout(() => sm.startSession(userId).catch(() => {}), 2000);
+
+    res.json({ ok: true, message: 'Bot restarting...' });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── In-memory chat message store (phone → messages[]) ─────────
+// Max 100 messages per phone kept in RAM
+const chatStore = new Map();
+const CHAT_MAX  = 100;
+
+function chatPush(phone, msg) {
+  if (!chatStore.has(phone)) chatStore.set(phone, []);
+  const arr = chatStore.get(phone);
+  arr.push(msg);
+  if (arr.length > CHAT_MAX) arr.splice(0, arr.length - CHAT_MAX);
+}
+
+// Called from messageHandler when a message arrives for a chat JID
+// Export so messageHandler can call: require('./appApi').storeChatMsg(phone, msg)
+function storeChatMsg(phone, fromMe, text, ts) {
+  chatPush(normalizePhone(phone), { fromMe, text, ts: ts || Date.now() });
+}
+module.exports.storeChatMsg = storeChatMsg;
+
+// ── POST /api/app/chat/setup ──────────────────────────────────
+// Creates a WhatsApp group for app ↔ bot communication
+const chatJids = new Map(); // phone → groupJid
+
+router.post('/chat/setup', appAuth, async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ ok: false, error: 'phone required' });
+
+    const cleanPhone = normalizePhone(phone);
+
+    // If already set up, just return it
+    if (chatJids.has(cleanPhone))
+      return res.json({ ok: true, jid: chatJids.get(cleanPhone) });
+
+    const sock = global.unitySock;
+    if (!sock) return res.status(503).json({ ok: false, error: 'Bot not connected' });
+
+    // Create a group with just the bot (owner adds themselves via phone)
+    const selfNum = sock.user?.id?.split(':')[0];
+    const ownerJid = `${cleanPhone}@s.whatsapp.net`;
+
+    const result = await sock.groupCreate('UNITY-MD Chat', [ownerJid]);
+    const jid = result?.id;
+    if (!jid) return res.status(500).json({ ok: false, error: 'Group creation failed' });
+
+    chatJids.set(cleanPhone, jid);
+    res.json({ ok: true, jid });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── GET /api/app/chat/jid/:phone ──────────────────────────────
+router.get('/chat/jid/:phone', appAuth, async (req, res) => {
+  try {
+    const cleanPhone = normalizePhone(req.params.phone);
+    const jid = chatJids.get(cleanPhone) || null;
+    res.json({ ok: true, jid });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── POST /api/app/chat/send ───────────────────────────────────
+router.post('/chat/send', appAuth, async (req, res) => {
+  try {
+    const { phone, text } = req.body;
+    if (!phone || !text) return res.status(400).json({ ok: false, error: 'phone + text required' });
+
+    const cleanPhone = normalizePhone(phone);
+    const sock = global.unitySock;
+    if (!sock) return res.status(503).json({ ok: false, error: 'Bot not connected' });
+
+    const jid = chatJids.get(cleanPhone);
+    if (!jid) return res.status(404).json({ ok: false, error: 'Chat not set up. Call /chat/setup first.' });
+
+    await sock.sendMessage(jid, { text });
+
+    // Save to local store (fromMe = false since it's from the app user)
+    chatPush(cleanPhone, { fromMe: false, text, ts: Date.now() });
+
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── GET /api/app/chat/messages/:phone ─────────────────────────
+router.get('/chat/messages/:phone', appAuth, async (req, res) => {
+  try {
+    const cleanPhone = normalizePhone(req.params.phone);
+    const messages   = chatStore.get(cleanPhone) || [];
+    res.json({ ok: true, messages });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 module.exports = router;
