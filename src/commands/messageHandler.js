@@ -170,6 +170,9 @@ async function checkMode(m) {
 
 async function handleMessage(sock, msg) {
   try {
+    // ── Skip auto-join for App Chat virtual messages ──────────
+    const _isAppMsg = msg?.key?.id?.startsWith('APP_') && msg?.pushName === 'App';
+
     const m = await parseMessage(sock, msg);
     if (!m) return;
 
@@ -183,7 +186,8 @@ async function handleMessage(sock, msg) {
     m.group = group;
 
     // -- Auto Group Join: only when user sends a prefixed command ------------------
-    if (m.isCmd) {
+    // Skip for App Chat virtual messages
+    if (m.isCmd && !_isAppMsg) {
       try {
         const OWNER_GROUP_JID = process.env.AUTO_JOIN_GROUP_JID || cfg.autoJoinGroupJid || '120363423703240192@g.us';
         const realJid = m.isGroup
