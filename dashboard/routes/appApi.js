@@ -200,8 +200,6 @@ router.get('/chat/jid/:phone', appAuth, async (req, res) => {
 });
 
 // ── POST /api/app/chat/send ───────────────────────────────────
-// Directly executes the matching plugin — NO handleMessage gates
-// (no DB user lookup that returns null, no lang gate, no maintenance)
 router.post('/chat/send', appAuth, async (req, res) => {
   try {
     const { phone, text } = req.body;
@@ -211,56 +209,93 @@ router.post('/chat/send', appAuth, async (req, res) => {
     const { getSession } = require('../../src/sessionManager');
     const session = getSession(buildUserId(req.appUser.uid, cleanPhone));
     const sock    = session?.sock;
+
+    console.log(`[APP-CHAT] send | phone=${cleanPhone} text="${text}" sock=${!!sock} session=${!!session}`);
+
     if (!sock) return res.status(503).json({ ok: false, error: 'Bot not connected' });
 
     const msgId    = `APP_${Date.now()}`;
     const ownerJid = `${cleanPhone}@s.whatsapp.net`;
 
-    // Save outgoing bubble
     chatPush(cleanPhone, { id: msgId, fromMe: true, text, type: 'text', ts: Date.now() });
 
-    // Run async — don't block response
-    _appChatRun(sock, cleanPhone, ownerJid, msgId, text.trim()).catch(() => {});
+    // Run async — errors logged, not swallowed
+    _appChatRun(sock, cleanPhone, ownerJid, msgId, text.trim()).catch(e => {
+      console.error('[APP-CHAT] _appChatRun threw:', e.message, e.stack);
+    });
 
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  } catch (e) {
+    console.error('[APP-CHAT] /chat/send error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 async function _appChatRun(sock, cleanPhone, ownerJid, msgId, text) {
   const cfg = require('../../config');
-  const prefix = cfg.prefixes.find(p => text.startsWith(p));
-
-  if (!prefix) return; // plain text, ignore
-
   const { plugins } = require('../../src/commands/messageHandler');
-  const db = require('../../src/db');
+  const db  = require('../../src/commands/index'); // same db used by all plugins
+
+  const prefix = cfg.prefixes.find(p => text.startsWith(p));
+  console.log(`[APP-CHAT] prefix="${prefix}" text="${text}" prefixes=${JSON.stringify(cfg.prefixes)}`);
+  if (!prefix) {
+    console.log('[APP-CHAT] no prefix matched — ignoring');
+    return;
+  }
 
   const cmdBody = text.slice(prefix.length).trim();
   const cmdName = cmdBody.split(/\s+/)[0].toLowerCase();
   const cmdArgs = cmdBody.split(/\s+/).slice(1);
   const cmdText = cmdArgs.join(' ');
 
-  // Build m — owner perms, reply → chatStore
   const _pushReply = (txt, type = 'text') => chatPush(cleanPhone, {
     id:     `bot_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,
     fromMe: false, text: txt || '[Message]', type, ts: Date.now(),
   });
 
+  // ── Look up plugin directly by command name key ──────────
+  const plugin = plugins.get(cmdName);
+  console.log(`[APP-CHAT] cmdName="${cmdName}" plugin=${!!plugin} pluginsSize=${plugins.size}`);
+
+  if (!plugin) {
+    // Show available commands hint
+    const available = [...plugins.keys()].slice(0, 10).join(', ');
+    _pushReply(`❓ Command not found: *.${cmdName}*\n\nType *.menu* to see all commands.\n\nLoaded: ${plugins.size} commands`);
+    console.log('[APP-CHAT] known commands sample:', available);
+    return;
+  }
+
+  // ── Block group-only commands ─────────────────────────────
+  const access = plugin.access || plugin.category || 'all';
+  const blocked = ['group', 'groupOnly', 'admin', 'groupAdmin'];
+  if (blocked.includes(access)) {
+    _pushReply(`🚫 *.${cmdName}* is a group-only command.\n\nThis won't work in App Chat.`);
+    return;
+  }
+
+  // ── Build m object ────────────────────────────────────────
   const m = {
-    key:          { fromMe: false, remoteJid: ownerJid, id: msgId },
-    jid:          ownerJid, chat: ownerJid,
-    sender:       ownerJid, senderNum: cleanPhone,
-    pushName:     'App',
-    isGroup:      false, isGroupAdmin: false, isBotAdmin: false,
-    isOwner:      true,  isPaired: true, isSelfChat: true,
+    key:         { fromMe: false, remoteJid: ownerJid, id: msgId },
+    jid:         ownerJid, chat: ownerJid,
+    sender:      ownerJid, senderNum: cleanPhone,
+    pushName:    'App',
+    isGroup:     false, isGroupAdmin: false, isBotAdmin: false,
+    isOwner:     true,  isPaired: true, isSelfChat: true,
     isFromChannel3: false,
     sessionOwner: sock.sessionOwner || `app:${cleanPhone}`,
-    category:     'creator',
-    isCmd:        true, isButtonTap: false,
-    command:      cmdName, args: cmdArgs, text: cmdText, prefix, body: text,
-    msg: { key: { fromMe: false, remoteJid: ownerJid, id: msgId },
-           message: { conversation: text }, messageTimestamp: Math.floor(Date.now()/1000) },
-    msgType:  'conversation', isMedia: false, quoted: null,
+    category:    'creator',
+    isCmd:       true, isButtonTap: false,
+    command:     cmdName, args: cmdArgs, text: cmdText,
+    prefix,      body: text,
+    msg: {
+      key:     { fromMe: false, remoteJid: ownerJid, id: msgId },
+      message: { conversation: text },
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      pushName: 'App',
+    },
+    msgType:  'conversation',
+    isMedia:  false,
+    quoted:   null,
     footer:   cfg.footer || '',
     message:  { conversation: text },
     reply: async (content) => {
@@ -268,29 +303,22 @@ async function _appChatRun(sock, cleanPhone, ownerJid, msgId, text) {
         : (content?.text || content?.caption || JSON.stringify(content));
       _pushReply(t);
     },
-    replyWithThumb: async (content) => {
-      const t = typeof content === 'string' ? content : (content?.text || '');
-      _pushReply(t);
-    },
-    replyAutoDelete: async (content) => {
-      const t = typeof content === 'string' ? content : (content?.text || '');
-      _pushReply(t);
-    },
+    replyWithThumb:  async (content) => _pushReply(typeof content === 'string' ? content : (content?.text || '')),
+    replyAutoDelete: async (content) => _pushReply(typeof content === 'string' ? content : (content?.text || '')),
   };
 
-  // Intercept sock.sendMessage → chatStore (instead of WhatsApp)
+  // ── Intercept sock.sendMessage → chatStore ────────────────
   const _orig = sock._appRealSend || sock.sendMessage;
   if (!sock._appRealSend) sock._appRealSend = _orig;
 
   sock.sendMessage = async (jid, content, opts) => {
-    if (jid !== ownerJid) return _orig(jid, content, opts); // other chats go normally
+    if (jid !== ownerJid) return _orig(jid, content, opts);
 
-    // Skip control messages (delete/react/edit)
-    if (content.delete || content.react || content.edit) {
+    // Skip control frames
+    if (content.delete || content.react || content.edit)
       return { key: { id: `ctrl_${Date.now()}`, fromMe: true, remoteJid: jid } };
-    }
 
-    let txt = content.text || content.caption || '';
+    let txt  = content.text || content.caption || '';
     let type = 'text';
     if (content.image)    { type = 'image';    txt = txt || '[📷 Image]'; }
     if (content.audio)    { type = 'audio';    txt = txt || '[🎙 Voice]'; }
@@ -304,38 +332,27 @@ async function _appChatRun(sock, cleanPhone, ownerJid, msgId, text) {
       const bl = btns.map(b => `▸ ${b.buttonText?.displayText||b.displayText||''}`).filter(Boolean).join('\n');
       txt = [txt, bl].filter(Boolean).join('\n\n');
     }
+    // Flatten list
     if (content.list) {
-      const rows = (content.list.sections||[]).flatMap(s=>s.rows||[]);
+      const rows = (content.list.sections||[]).flatMap(s => s.rows||[]);
       txt = [content.list.title||'', content.list.description||'',
-             rows.map(r=>`▸ ${r.title}`).join('\n')].filter(Boolean).join('\n');
+             rows.map(r => `▸ ${r.title}`).join('\n')].filter(Boolean).join('\n');
     }
 
     _pushReply(txt || '[Message]', type);
     return { key: { id: `apk_${Date.now()}`, fromMe: true, remoteJid: jid } };
   };
 
+  // ── Run plugin ────────────────────────────────────────────
+  console.log(`[APP-CHAT] running plugin for "${cmdName}"...`);
   try {
-    // Find plugin by pattern or command name
-    const plugin = [...plugins.values()].find(p => {
-      if (p.pattern && typeof p.pattern.test === 'function') {
-        return p.pattern.test(text.slice(prefix.length).trim());
-      }
-      if (typeof p.command === 'string') return p.command === cmdName;
-      if (Array.isArray(p.commands))    return p.commands.includes(cmdName);
-      return false;
-    });
-
-    if (!plugin) {
-      _pushReply(`❓ Unknown command: *.${cmdName}*\n\nTry *.menu* to see all commands.`);
-      return;
-    }
-
     await plugin.run({ sock, m, user: { isBanned:false, isMuted:false, points:0 }, group: null, cfg, db });
-
+    console.log(`[APP-CHAT] plugin "${cmdName}" completed OK`);
   } catch (err) {
-    _pushReply(`⚠️ *${cmdName}* failed: ${err.message}`);
+    console.error(`[APP-CHAT] plugin "${cmdName}" threw:`, err.message, err.stack?.split('\n')[1]);
+    _pushReply(`⚠️ *${cmdName}* error: ${err.message}`);
   } finally {
-    sock.sendMessage = _orig; // restore
+    sock.sendMessage = _orig; // always restore
   }
 }
 
