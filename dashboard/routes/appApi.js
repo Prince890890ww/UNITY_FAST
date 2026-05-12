@@ -200,6 +200,8 @@ router.get('/chat/jid/:phone', appAuth, async (req, res) => {
 });
 
 // ── POST /api/app/chat/send ───────────────────────────────────
+// Directly executes the matching plugin — NO handleMessage gates
+// (no DB user lookup that returns null, no lang gate, no maintenance)
 router.post('/chat/send', appAuth, async (req, res) => {
   try {
     const { phone, text } = req.body;
@@ -214,101 +216,128 @@ router.post('/chat/send', appAuth, async (req, res) => {
     const msgId    = `APP_${Date.now()}`;
     const ownerJid = `${cleanPhone}@s.whatsapp.net`;
 
-    // ① Save user's outgoing bubble immediately
+    // Save outgoing bubble
     chatPush(cleanPhone, { id: msgId, fromMe: true, text, type: 'text', ts: Date.now() });
 
-    // ② Check if it's a command
-    const cfg_  = require('../../config');
-    const isCmd = cfg_.prefixes?.some(p => text.trim().startsWith(p));
-
-    if (!isCmd) {
-      // Plain message — just echo in store, no bot processing
-      return res.json({ ok: true });
-    }
-
-    // ③ Intercept sock.sendMessage → capture bot replies to chatStore
-    //    IMPORTANT: handleMessage ALSO wraps/restores sock.sendMessage internally,
-    //    so we must set our interceptor BEFORE calling handleMessage, and the
-    //    internal restore will still point to our interceptor since it captures
-    //    the current value.
-    const _realSend = sock._realSend || sock.sendMessage; // keep real original safe
-    sock._realSend  = _realSend;                          // persist across multiple calls
-
-    sock.sendMessage = async (jid, content, opts) => {
-      // Extract readable content from whatever the bot sends
-      let replyText = '';
-      let replyType = 'text';
-
-      if (typeof content.text     === 'string') replyText = content.text;
-      if (typeof content.caption  === 'string') replyText = content.caption;
-      if (content.image)   { replyType = 'image';    replyText = replyText || '[📷 Image]'; }
-      if (content.audio)   { replyType = 'audio';    replyText = replyText || '[🎙 Voice Note]'; }
-      if (content.video)   { replyType = 'video';    replyText = replyText || '[🎬 Video]'; }
-      if (content.sticker) { replyType = 'sticker';  replyText = '[🎭 Sticker]'; }
-      if (content.document){ replyType = 'document'; replyText = replyText || `[📄 ${content.fileName || 'File'}]`; }
-
-      // Flatten buttons/list to readable text
-      const btns = content.buttons || content.templateButtons || [];
-      if (btns.length) {
-        const bLines = btns.map(b => `▸ ${b.buttonText?.displayText || b.displayText || ''}`).filter(Boolean).join('\n');
-        replyText = [replyText, bLines].filter(Boolean).join('\n\n');
-      }
-      if (content.list) {
-        const rows = (content.list.sections || []).flatMap(s => s.rows || []);
-        replyText = [
-          content.list.title || '', content.list.description || '',
-          rows.map(r => `▸ ${r.title}`).join('\n'),
-        ].filter(Boolean).join('\n');
-      }
-
-      // Save to chatStore
-      if (replyText || replyType !== 'text') {
-        chatPush(cleanPhone, {
-          id:     `bot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          fromMe: false,
-          text:   replyText || '[Message]',
-          type:   replyType,
-          ts:     Date.now(),
-        });
-      }
-
-      // Return fake key — do NOT forward to WhatsApp
-      return { key: { id: `appchat_${Date.now()}`, fromMe: true, remoteJid: jid } };
-    };
-
-    // ④ Build fake DM message (fromMe=false, remoteJid=ownerJid → isOwner=true in parser)
-    const fakeMsg = {
-      key: {
-        fromMe:    false,
-        remoteJid: ownerJid,
-        id:        msgId,
-      },
-      message:          { conversation: text.trim() },
-      messageTimestamp: Math.floor(Date.now() / 1000),
-      pushName:         'App',
-    };
-
-    // ⑤ Call handleMessage directly (await = waits for full plugin execution)
-    try {
-      const { handleMessage } = require('../../src/commands/messageHandler');
-      await handleMessage(sock, fakeMsg);
-    } catch (cmdErr) {
-      console.error('[AppChat CMD]', cmdErr.message);
-      chatPush(cleanPhone, {
-        id: `err_${Date.now()}`, fromMe: false,
-        text: `⚠️ Error: ${cmdErr.message}`, type: 'text', ts: Date.now(),
-      });
-    }
-
-    // ⑥ Restore real sendMessage (handleMessage may have already restored it,
-    //    but set it explicitly to be safe)
-    sock.sendMessage = _realSend;
+    // Run async — don't block response
+    _appChatRun(sock, cleanPhone, ownerJid, msgId, text.trim()).catch(() => {});
 
     res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+
+async function _appChatRun(sock, cleanPhone, ownerJid, msgId, text) {
+  const cfg = require('../../config');
+  const prefix = cfg.prefixes.find(p => text.startsWith(p));
+
+  if (!prefix) return; // plain text, ignore
+
+  const { plugins } = require('../../src/commands/messageHandler');
+  const db = require('../../src/db');
+
+  const cmdBody = text.slice(prefix.length).trim();
+  const cmdName = cmdBody.split(/\s+/)[0].toLowerCase();
+  const cmdArgs = cmdBody.split(/\s+/).slice(1);
+  const cmdText = cmdArgs.join(' ');
+
+  // Build m — owner perms, reply → chatStore
+  const _pushReply = (txt, type = 'text') => chatPush(cleanPhone, {
+    id:     `bot_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,
+    fromMe: false, text: txt || '[Message]', type, ts: Date.now(),
+  });
+
+  const m = {
+    key:          { fromMe: false, remoteJid: ownerJid, id: msgId },
+    jid:          ownerJid, chat: ownerJid,
+    sender:       ownerJid, senderNum: cleanPhone,
+    pushName:     'App',
+    isGroup:      false, isGroupAdmin: false, isBotAdmin: false,
+    isOwner:      true,  isPaired: true, isSelfChat: true,
+    isFromChannel3: false,
+    sessionOwner: sock.sessionOwner || `app:${cleanPhone}`,
+    category:     'creator',
+    isCmd:        true, isButtonTap: false,
+    command:      cmdName, args: cmdArgs, text: cmdText, prefix, body: text,
+    msg: { key: { fromMe: false, remoteJid: ownerJid, id: msgId },
+           message: { conversation: text }, messageTimestamp: Math.floor(Date.now()/1000) },
+    msgType:  'conversation', isMedia: false, quoted: null,
+    footer:   cfg.footer || '',
+    message:  { conversation: text },
+    reply: async (content) => {
+      const t = typeof content === 'string' ? content
+        : (content?.text || content?.caption || JSON.stringify(content));
+      _pushReply(t);
+    },
+    replyWithThumb: async (content) => {
+      const t = typeof content === 'string' ? content : (content?.text || '');
+      _pushReply(t);
+    },
+    replyAutoDelete: async (content) => {
+      const t = typeof content === 'string' ? content : (content?.text || '');
+      _pushReply(t);
+    },
+  };
+
+  // Intercept sock.sendMessage → chatStore (instead of WhatsApp)
+  const _orig = sock._appRealSend || sock.sendMessage;
+  if (!sock._appRealSend) sock._appRealSend = _orig;
+
+  sock.sendMessage = async (jid, content, opts) => {
+    if (jid !== ownerJid) return _orig(jid, content, opts); // other chats go normally
+
+    // Skip control messages (delete/react/edit)
+    if (content.delete || content.react || content.edit) {
+      return { key: { id: `ctrl_${Date.now()}`, fromMe: true, remoteJid: jid } };
+    }
+
+    let txt = content.text || content.caption || '';
+    let type = 'text';
+    if (content.image)    { type = 'image';    txt = txt || '[📷 Image]'; }
+    if (content.audio)    { type = 'audio';    txt = txt || '[🎙 Voice]'; }
+    if (content.video)    { type = 'video';    txt = txt || '[🎬 Video]'; }
+    if (content.sticker)  { type = 'sticker';  txt = '[🎭 Sticker]'; }
+    if (content.document) { type = 'document'; txt = txt || `[📄 ${content.fileName||'File'}]`; }
+
+    // Flatten buttons
+    const btns = content.buttons || content.templateButtons || [];
+    if (btns.length) {
+      const bl = btns.map(b => `▸ ${b.buttonText?.displayText||b.displayText||''}`).filter(Boolean).join('\n');
+      txt = [txt, bl].filter(Boolean).join('\n\n');
+    }
+    if (content.list) {
+      const rows = (content.list.sections||[]).flatMap(s=>s.rows||[]);
+      txt = [content.list.title||'', content.list.description||'',
+             rows.map(r=>`▸ ${r.title}`).join('\n')].filter(Boolean).join('\n');
+    }
+
+    _pushReply(txt || '[Message]', type);
+    return { key: { id: `apk_${Date.now()}`, fromMe: true, remoteJid: jid } };
+  };
+
+  try {
+    // Find plugin by pattern or command name
+    const plugin = [...plugins.values()].find(p => {
+      if (p.pattern && typeof p.pattern.test === 'function') {
+        return p.pattern.test(text.slice(prefix.length).trim());
+      }
+      if (typeof p.command === 'string') return p.command === cmdName;
+      if (Array.isArray(p.commands))    return p.commands.includes(cmdName);
+      return false;
+    });
+
+    if (!plugin) {
+      _pushReply(`❓ Unknown command: *.${cmdName}*\n\nTry *.menu* to see all commands.`);
+      return;
+    }
+
+    await plugin.run({ sock, m, user: { isBanned:false, isMuted:false, points:0 }, group: null, cfg, db });
+
+  } catch (err) {
+    _pushReply(`⚠️ *${cmdName}* failed: ${err.message}`);
+  } finally {
+    sock.sendMessage = _orig; // restore
+  }
+}
 
 // ── GET /api/app/chat/messages/:phone ─────────────────────────
 router.get('/chat/messages/:phone', appAuth, async (req, res) => {
