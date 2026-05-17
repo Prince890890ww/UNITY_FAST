@@ -125,7 +125,7 @@ async function connectToWhatsApp() {
         const stored = messageStore.get(key.id);
         return stored || proto.Message.fromObject({});
       },
-      browser: Browsers.baileys('Desktop'),
+      browser: ['UNITY-MD', 'Chrome', '120.0.0'],
     });
 
     global.unitySock = sock;
@@ -242,6 +242,7 @@ async function connectToWhatsApp() {
         const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
         console.log(chalk.red(`[CONN] Closed — code: ${reason}`));
         if (pairingInterval) { clearInterval(pairingInterval); pairingInterval = null; }
+        if (global._keepAliveInterval) { clearInterval(global._keepAliveInterval); global._keepAliveInterval = null; }
 
         if (reason === DisconnectReason.connectionLost) {
           safeReconnect('Connection lost');
@@ -279,6 +280,19 @@ async function connectToWhatsApp() {
         pairingStarted = false;
         if (pairingInterval) { clearInterval(pairingInterval); pairingInterval = null; }
         global.unitySock = sock;
+
+        // ── Keep-alive ping: every 25s send unavailable presence ──
+        // Prevents Railway/WA from silently dropping idle socket
+        if (global._keepAliveInterval) clearInterval(global._keepAliveInterval);
+        global._keepAliveInterval = setInterval(async () => {
+          try {
+            if (sock?.ws?.readyState === 1) {
+              await sock.sendPresenceUpdate('unavailable').catch(() => {});
+            } else {
+              console.log(chalk.yellow('[KEEPALIVE] Socket not ready — skipping ping'));
+            }
+          } catch (_kae) {}
+        }, 25_000);
 
         // ── Register main bot in sessionManager so mgmt bot can use it ──
         try {
