@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNITY-MD • Boost Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Orbitron:wght@400;700;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Orbitron:wght@400;700;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"></noscript>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#020408;--bg2:#030610;
+  --card:rgba(6,10,20,0.85);
+  --g1:#25d366;--g2:#00e5ff;--g3:#a259ff;--g4:#ff6b6b;--g5:#ffd93d;
+  --text:#f0f4ff;--sub:#4a5280;
+  --border:rgba(37,211,102,0.12);
+  --red:#ff4757;--amber:#ffd93d;
+}
+body{background:var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;min-height:100vh;overflow-x:hidden;position:relative}
+
+/* ── BACKGROUNDS ── */
+#aurora{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.aura{position:absolute;border-radius:50%;filter:blur(60px)}
+.aura1{width:600px;height:600px;background:radial-gradient(circle,rgba(37,211,102,0.07),transparent 70%);top:-200px;left:-200px}
+.aura2{width:500px;height:500px;background:radial-gradient(circle,rgba(162,89,255,0.05),transparent 70%);top:20%;right:-200px}
+#grid{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(37,211,102,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(37,211,102,0.025) 1px,transparent 1px);
+  background-size:64px 64px;mask-image:radial-gradient(ellipse 70% 70% at 50% 50%,black,transparent)}
+#meteors{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.meteor{position:absolute;top:0;width:1px;height:80px;background:linear-gradient(180deg,rgba(37,211,102,0),rgba(37,211,102,0.8),rgba(0,229,255,0.4),transparent);border-radius:2px;animation:meteorFall linear infinite;opacity:0}
+@keyframes meteorFall{0%{transform:translateY(-100px) rotate(15deg);opacity:0}5%{opacity:1}80%{opacity:.6}100%{transform:translateY(110vh) rotate(15deg);opacity:0}}
+
+/* ── CORNER DECO ── */
+.cb{position:fixed;width:36px;height:36px;z-index:2;pointer-events:none;opacity:.3}
+.cb.tl{top:20px;left:20px;border-top:2px solid var(--g1);border-left:2px solid var(--g1)}
+.cb.tr{top:20px;right:20px;border-top:2px solid var(--g2);border-right:2px solid var(--g2)}
+.cb.bl{bottom:20px;left:20px;border-bottom:2px solid var(--g3);border-left:2px solid var(--g3)}
+.cb.br{bottom:20px;right:20px;border-bottom:2px solid var(--g1);border-right:2px solid var(--g1)}
+
+/* ── TOP BAR ── */
+#top-bar{position:fixed;top:0;left:0;right:0;height:2px;z-index:9999;pointer-events:none;
+  background:linear-gradient(90deg,var(--g1),var(--g3),var(--g2),var(--g1));background-size:300% 100%;
+  animation:topBarShimmer 3s linear infinite,topBarLoad 1.2s cubic-bezier(.22,1,.36,1) forwards;transform-origin:left;
+  box-shadow:0 0 12px rgba(162,89,255,0.8),0 0 24px rgba(37,211,102,0.4)}
+@keyframes topBarShimmer{0%{background-position:300% 0}100%{background-position:-300% 0}}
+@keyframes topBarLoad{from{scaleX:0}to{scaleX:1}}
+
+/* ── LAYOUT ── */
+.page{position:relative;z-index:3;width:100%;max-width:560px;margin:0 auto;padding:32px 20px 60px}
+@keyframes riseIn{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── HERO ── */
+.hero{text-align:center;padding:40px 0 24px;animation:riseIn .9s cubic-bezier(.22,1,.36,1)}
+.logo-orbit{position:relative;display:inline-block;margin-bottom:20px}
+.orbit-ring{position:absolute;top:50%;left:50%;border-radius:50%;border:1px solid;transform:translate(-50%,-50%);animation:orbitSpin linear infinite}
+.orbit-ring.r1{width:216px;height:216px;border-color:rgba(162,89,255,0.2);animation-duration:18s}
+.orbit-ring::after{content:'';position:absolute;width:8px;height:8px;border-radius:50%;background:currentColor;top:50%;margin-top:-4px;right:-4px;box-shadow:0 0 8px currentColor}
+@keyframes orbitSpin{from{transform:translate(-50%,-50%) rotate(0deg)}to{transform:translate(-50%,-50%) rotate(360deg)}}
+.logo-icon-wrap{width:160px;height:160px;border-radius:36px;position:relative;z-index:1;
+  background:linear-gradient(135deg,rgba(162,89,255,0.15),rgba(37,211,102,0.08));
+  border:1px solid rgba(162,89,255,0.25);display:inline-flex;align-items:center;justify-content:center;
+  overflow:hidden;box-shadow:0 0 40px rgba(162,89,255,0.15),inset 0 0 20px rgba(162,89,255,0.05)}
+.logo-icon-wrap img{width:100%;height:100%;object-fit:cover;border-radius:36px}
+.hero-title{font-family:'Orbitron',monospace;font-size:2rem;font-weight:900;letter-spacing:4px;
+  background:linear-gradient(90deg,var(--g3),var(--g1),var(--g2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+.hero-sub{color:var(--sub);font-size:.65rem;letter-spacing:5px;text-transform:uppercase;font-family:'JetBrains Mono',monospace;margin-bottom:4px}
+.hero-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;
+  background:rgba(162,89,255,0.08);border:1px solid rgba(162,89,255,0.25);color:var(--g3);
+  font-size:.68rem;font-family:'JetBrains Mono',monospace;font-weight:700;letter-spacing:1px;margin-top:10px}
+
+/* ── STATS ── */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:20px 0;animation:riseIn .9s .1s cubic-bezier(.22,1,.36,1) both}
+.stat{background:var(--card);backdrop-filter:blur(20px);border-radius:16px;padding:16px 10px;text-align:center;border:1px solid rgba(255,255,255,0.05);position:relative;overflow:hidden;transition:transform .25s,border-color .25s}
+.stat::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:2px 2px 0 0}
+.stat:nth-child(1)::before{background:linear-gradient(90deg,var(--g3),var(--g1))}
+.stat:nth-child(2)::before{background:linear-gradient(90deg,var(--g1),var(--g2))}
+.stat:nth-child(3)::before{background:linear-gradient(90deg,var(--g2),var(--g3))}
+.stat:hover{transform:translateY(-3px);border-color:rgba(255,255,255,0.1)}
+.stat-val{font-size:1.7rem;font-weight:800;font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,var(--g3),var(--g1));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.stat-lbl{font-size:.58rem;color:var(--sub);letter-spacing:3px;text-transform:uppercase;margin-top:4px;font-family:'JetBrains Mono',monospace}
+
+/* ── CARD ── */
+.card{background:var(--card);backdrop-filter:blur(24px);border:1px solid var(--border);border-radius:24px;padding:28px;position:relative;overflow:hidden;box-shadow:0 0 0 1px rgba(162,89,255,0.03),0 40px 80px rgba(0,0,0,0.6);animation:riseIn .9s .2s cubic-bezier(.22,1,.36,1) both;margin-bottom:16px}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(162,89,255,0.6),rgba(37,211,102,0.3),rgba(0,229,255,0.2),transparent)}
+.card-head{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.card-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;box-shadow:0 0 20px rgba(162,89,255,0.12)}
+.ci-follow{background:linear-gradient(135deg,rgba(37,211,102,0.15),rgba(0,229,255,0.08));border:1px solid rgba(37,211,102,0.2)}
+.ci-react{background:linear-gradient(135deg,rgba(162,89,255,0.15),rgba(255,107,107,0.08));border:1px solid rgba(162,89,255,0.2)}
+.card-title{font-size:1.05rem;font-weight:700;letter-spacing:-.2px}
+.card-subtitle{font-size:.78rem;color:var(--sub);margin-top:2px}
+
+/* ── INPUT ── */
+input[type=text],input[type=password]{
+  width:100%;background:rgba(37,211,102,0.03);border:1.5px solid rgba(37,211,102,0.1);
+  border-radius:12px;padding:0 16px;height:52px;color:var(--text);font-size:.95rem;outline:none;
+  transition:all .25s;font-family:'Space Grotesk',sans-serif;margin-bottom:10px}
+input[type=text]:focus,input[type=password]:focus{border-color:rgba(162,89,255,0.45);background:rgba(162,89,255,0.04);box-shadow:0 0 0 4px rgba(162,89,255,0.08)}
+input::placeholder{color:rgba(74,82,128,0.6)}
+
+/* ── EMOJI GRID ── */
+.emoji-grid{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.emoji-chip{width:42px;height:42px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.07);background:rgba(255,255,255,0.03);cursor:pointer;font-size:1.3rem;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.emoji-chip:hover{border-color:rgba(162,89,255,0.4);background:rgba(162,89,255,0.1);transform:scale(1.1)}
+.emoji-chip.selected{border-color:var(--g3);background:rgba(162,89,255,0.15);box-shadow:0 0 12px rgba(162,89,255,0.2)}
+
+/* ── BUTTON ── */
+.btn{background:linear-gradient(135deg,var(--g3),#7c3aed);color:#fff;border:none;border-radius:12px;padding:0 24px;height:52px;font-size:.95rem;font-weight:700;cursor:pointer;transition:all .25s cubic-bezier(.22,1,.36,1);white-space:nowrap;font-family:'Space Grotesk',sans-serif;box-shadow:0 4px 20px rgba(162,89,255,0.3);position:relative;overflow:hidden;width:100%;margin-bottom:8px}
+.btn::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0.1),transparent);opacity:0;transition:opacity .2s}
+.btn:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(162,89,255,0.45)}
+.btn:hover::before{opacity:1}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-green{background:linear-gradient(135deg,var(--g1),#00c853);box-shadow:0 4px 20px rgba(37,211,102,0.3)}
+.btn-green:hover{box-shadow:0 8px 30px rgba(37,211,102,0.4)}
+
+/* ── GLOW HR ── */
+.ghr{height:1px;border:none;margin:18px 0;background:linear-gradient(90deg,transparent,rgba(162,89,255,0.3),rgba(37,211,102,0.15),transparent)}
+
+/* ── PROGRESS BOX ── */
+.progress-box{display:none;margin-top:14px}
+.progress-box.show{display:block;animation:riseIn .4s ease}
+.progress-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.progress-title{font-size:.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--sub);font-family:'JetBrains Mono',monospace}
+.progress-summary{font-size:.75rem;font-family:'JetBrains Mono',monospace;color:var(--text)}
+.progress-list{max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:5px}
+.prog-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;border:1px solid;font-size:.78rem;font-family:'JetBrains Mono',monospace;animation:riseIn .3s ease}
+.prog-item.ok{background:rgba(37,211,102,0.05);border-color:rgba(37,211,102,0.2);color:var(--g1)}
+.prog-item.fail{background:rgba(255,71,87,0.05);border-color:rgba(255,71,87,0.15);color:var(--red)}
+.prog-item.skip{background:rgba(255,217,61,0.04);border-color:rgba(255,217,61,0.15);color:var(--amber)}
+.prog-num{flex:1;font-weight:700}
+.prog-icon{font-size:1rem;flex-shrink:0}
+.prog-reason{font-size:.68rem;color:var(--sub);margin-top:1px}
+
+/* ── SUMMARY BADGE ── */
+.sum-box{display:none;border-radius:14px;padding:14px 18px;margin-top:12px;display:flex;align-items:center;gap:12px}
+.sum-box.ok{background:rgba(37,211,102,0.06);border:1px solid rgba(37,211,102,0.2)}
+.sum-box.fail{background:rgba(255,71,87,0.06);border:1px solid rgba(255,71,87,0.2)}
+.sum-box.show{display:flex;animation:riseIn .4s ease}
+.sum-icon{font-size:1.5rem;flex-shrink:0}
+.sum-text{font-size:.82rem;color:var(--text)}
+.sum-text strong{color:var(--g1)}
+.sum-box.fail .sum-text strong{color:var(--red)}
+
+/* ── ERR MSG ── */
+.err-msg{display:none;background:rgba(255,71,87,.06);border:1px solid rgba(255,71,87,.2);border-radius:10px;padding:10px 14px;color:var(--red);font-size:.82rem;margin-top:8px}
+.err-msg.show{display:block;animation:fadeUp .3s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── LOGIN OVERLAY ── */
+#login-overlay{position:fixed;inset:0;z-index:500;background:rgba(2,4,8,0.97);backdrop-filter:blur(20px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+#login-overlay.hidden{display:none}
+.login-box{width:100%;max-width:380px;background:var(--card);border:1px solid rgba(162,89,255,0.2);border-radius:24px;padding:36px 28px;text-align:center;box-shadow:0 0 80px rgba(162,89,255,0.1),0 40px 80px rgba(0,0,0,0.6);animation:riseIn .6s cubic-bezier(.22,1,.36,1)}
+.login-box::before{content:'';display:block;position:absolute;inset:0;border-radius:24px;pointer-events:none;background:conic-gradient(from var(--angle2),rgba(162,89,255,0.5),rgba(37,211,102,0.3),rgba(0,229,255,0.3),rgba(162,89,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;padding:1px;animation:borderSpin 4s linear infinite}
+@property --angle2{syntax:'<angle>';initial-value:0deg;inherits:false}
+@keyframes borderSpin{to{--angle2:360deg}}
+.login-box{position:relative}
+.login-icon{font-size:3rem;margin-bottom:14px;display:block}
+.login-title{font-family:'Orbitron',monospace;font-size:1.1rem;font-weight:900;letter-spacing:3px;background:linear-gradient(90deg,var(--g3),var(--g1));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+.login-sub{color:var(--sub);font-size:.72rem;letter-spacing:2px;text-transform:uppercase;font-family:'JetBrains Mono',monospace;margin-bottom:22px}
+.login-box input[type=password]{text-align:center;letter-spacing:6px;font-size:1.1rem;font-weight:700}
+.login-err{color:var(--red);font-size:.8rem;margin-top:6px;min-height:20px}
+
+/* ── SPINNER ── */
+.spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── PULSE DOT ── */
+.pulse-dot{width:8px;height:8px;border-radius:50%;background:var(--g1);flex-shrink:0;animation:pdot 1.4s ease-in-out infinite}
+@keyframes pdot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.6)}}
+
+/* ── FOOTER ── */
+.footer{margin-top:28px;text-align:center;color:rgba(74,82,128,0.5);font-size:.63rem;letter-spacing:2px;text-transform:uppercase;font-family:'JetBrains Mono',monospace;animation:riseIn .9s .5s cubic-bezier(.22,1,.36,1) both}
+.footer a{color:var(--g3);text-decoration:none}
+.footer-dots{display:flex;justify-content:center;gap:6px;margin-top:12px}
+.fdot{width:4px;height:4px;border-radius:50%;animation:fdotAnim 2s ease-in-out infinite}
+.fdot:nth-child(1){background:var(--g3);animation-delay:0s}
+.fdot:nth-child(2){background:var(--g1);animation-delay:.3s}
+.fdot:nth-child(3){background:var(--g2);animation-delay:.6s}
+.fdot:nth-child(4){background:var(--g5);animation-delay:.9s}
+.fdot:nth-child(5){background:var(--g4);animation-delay:1.2s}
+@keyframes fdotAnim{0%,100%{transform:scaleY(1);opacity:.4}50%{transform:scaleY(2.5);opacity:1}}
+
+/* ── LOGOUT BTN ── */
+#logout-btn{position:fixed;top:18px;right:18px;z-index:300;padding:7px 16px;border-radius:20px;background:rgba(255,71,87,0.08);border:1px solid rgba(255,71,87,0.2);color:var(--red);font-family:'JetBrains Mono',monospace;font-size:.65rem;font-weight:700;cursor:pointer;transition:all .2s;display:none}
+#logout-btn:hover{background:rgba(255,71,87,0.18)}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--g3),var(--g1),var(--g2));border-radius:4px}
+</style>
+</head>
+<body>
+
+<div id="top-bar"></div>
+<div id="meteors"></div>
+<div id="aurora"><div class="aura aura1"></div><div class="aura aura2"></div></div>
+<div id="grid"></div>
+<div class="cb tl"></div><div class="cb tr"></div>
+<div class="cb bl"></div><div class="cb br"></div>
+
+<!-- ── LOGIN OVERLAY ── -->
+<div id="login-overlay">
+  <div class="login-box">
+    <span class="login-icon">🔐</span>
+    <div class="login-title">BOOST PANEL</div>
+    <div class="login-sub">® UNITY-MD • Secured Access</div>
+    <input type="password" id="pw-input" placeholder="••••••" maxlength="20" autocomplete="off" onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="login-err" id="login-err"></div>
+    <button class="btn" id="login-btn" onclick="doLogin()" style="margin-top:6px">🚀 Enter Panel</button>
+  </div>
+</div>
+
+<!-- ── LOGOUT ── -->
+<button id="logout-btn" onclick="doLogout()">✕ Logout</button>
+
+<!-- ════ MAIN PAGE ════ -->
+<div class="page" id="main-page" style="display:none">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="logo-orbit">
+      <div class="orbit-ring r1" style="color:rgba(162,89,255,0.3)"></div>
+      <div class="logo-icon-wrap"><img src="/media/unity_thumb.jpg" alt="UNITY-MD" onerror="this.style.display='none';this.parentElement.innerHTML='<span style=\'font-size:4rem\'>⚡</span>'"></div>
+    </div>
+    <div class="hero-title">UNITY-MD</div>
+    <div class="hero-sub">® Unity Team • Boost Panel</div>
+    <div class="hero-badge"><span class="pulse-dot" style="background:var(--g3)"></span> BOOST CONTROL CENTER</div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat"><div class="stat-val" id="cnt-on">—</div><div class="stat-lbl">Online</div></div>
+    <div class="stat"><div class="stat-val" id="cnt-usr">—</div><div class="stat-lbl">Users</div></div>
+    <div class="stat"><div class="stat-val" id="cnt-grp">—</div><div class="stat-lbl">Groups</div></div>
+  </div>
+
+  <!-- ── FOLLOW BOOST CARD ── -->
+  <div class="card" style="animation-delay:.25s">
+    <div class="card-head">
+      <div class="card-icon ci-follow">📢</div>
+      <div>
+        <div class="card-title">Follow Boost</div>
+        <div class="card-subtitle">All sessions follow the channel instantly</div>
+      </div>
+    </div>
+
+    <input type="text" id="follow-link" placeholder="https://whatsapp.com/channel/xxxxx">
+    <button class="btn btn-green" id="follow-btn" onclick="doFollow()">⚡ Start Follow Boost</button>
+    <div class="err-msg" id="follow-err"></div>
+
+    <!-- Progress -->
+    <div class="progress-box" id="follow-progress">
+      <div class="ghr"></div>
+      <div class="progress-head">
+        <div class="progress-title">📡 Live Progress</div>
+        <div class="progress-summary" id="follow-sum-live"></div>
+      </div>
+      <div class="progress-list" id="follow-list"></div>
+    </div>
+
+    <!-- Final Summary -->
+    <div class="sum-box" id="follow-final">
+      <span class="sum-icon" id="follow-final-icon">✅</span>
+      <div class="sum-text" id="follow-final-text"></div>
+    </div>
+  </div>
+
+  <!-- ── REACT BOOST CARD ── -->
+  <div class="card" style="animation-delay:.35s">
+    <div class="card-head">
+      <div class="card-icon ci-react">❤️</div>
+      <div>
+        <div class="card-title">React Boost</div>
+        <div class="card-subtitle">All sessions react to the latest post</div>
+      </div>
+    </div>
+
+    <input type="text" id="react-link" placeholder="https://whatsapp.com/channel/xxxxx">
+
+    <!-- Emoji picker -->
+    <div style="font-size:.62rem;color:var(--sub);letter-spacing:3px;text-transform:uppercase;font-family:'JetBrains Mono',monospace;margin-bottom:8px">Choose Emoji</div>
+    <div class="emoji-grid" id="emoji-grid"></div>
+
+    <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+      <input type="text" id="custom-emoji" placeholder="Custom emoji…" style="margin-bottom:0;flex:1;height:44px;font-size:.9rem" oninput="onCustomEmoji(this.value)">
+      <div id="custom-preview" style="font-size:1.6rem;min-width:36px;text-align:center"></div>
+    </div>
+
+    <button class="btn" id="react-btn" onclick="doReact()">🎯 Start React Boost</button>
+    <div class="err-msg" id="react-err"></div>
+
+    <!-- Progress -->
+    <div class="progress-box" id="react-progress">
+      <div class="ghr"></div>
+      <div class="progress-head">
+        <div class="progress-title">📡 Live Progress</div>
+        <div class="progress-summary" id="react-sum-live"></div>
+      </div>
+      <div class="progress-list" id="react-list"></div>
+    </div>
+
+    <!-- Final Summary -->
+    <div class="sum-box" id="react-final">
+      <span class="sum-icon" id="react-final-icon">✅</span>
+      <div class="sum-text" id="react-final-text"></div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div>Powered by <a href="#">UNITY-MD</a> &nbsp;•&nbsp; ® Unity Team Sri Lanka 🇱🇰</div>
+    <div style="margin-top:6px;opacity:.5">Boost Panel &nbsp;•&nbsp; All sessions · All at once</div>
+    <div class="footer-dots">
+      <div class="fdot"></div><div class="fdot"></div><div class="fdot"></div>
+      <div class="fdot"></div><div class="fdot"></div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// ── SOCKET ─────────────────────────────────────────────────────
+const socket = io();
+
+// ── AUTH ────────────────────────────────────────────────────────
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/boost/check');
+    const d = await r.json();
+    if (d.authenticated) showPanel();
+  } catch(e) {}
+}
+
+async function doLogin() {
+  const pw = document.getElementById('pw-input').value.trim();
+  const btn = document.getElementById('login-btn');
+  const err = document.getElementById('login-err');
+  if (!pw) { err.textContent = '⚠️ Enter the password'; return; }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Verifying…';
+  err.textContent = '';
+  try {
+    const r = await fetch('/api/boost/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showPanel();
+    } else {
+      err.textContent = '❌ Wrong password. Try again.';
+      document.getElementById('pw-input').value = '';
+    }
+  } catch(e) {
+    err.textContent = '⚠️ Network error. Try again.';
+  }
+  btn.disabled = false;
+  btn.innerHTML = '🚀 Enter Panel';
+}
+
+async function doLogout() {
+  await fetch('/api/boost/logout', { method: 'POST' }).catch(() => {});
+  document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('main-page').style.display = 'none';
+  document.getElementById('logout-btn').style.display = 'none';
+  document.getElementById('pw-input').value = '';
+  document.getElementById('login-err').textContent = '';
+}
+
+function showPanel() {
+  document.getElementById('login-overlay').classList.add('hidden');
+  document.getElementById('main-page').style.display = 'block';
+  document.getElementById('logout-btn').style.display = 'block';
+  loadStats();
+}
+
+// ── STATS ───────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const r = await fetch('/api/pair/stats');
+    if (!r.ok) return;
+    const d = await r.json();
+    animCount('cnt-on', d.connected ?? 0);
+    animCount('cnt-usr', d.users ?? 0);
+    animCount('cnt-grp', d.groups ?? 0);
+  } catch(e) {}
+}
+function animCount(id, target) {
+  const el = document.getElementById(id);
+  const start = parseInt(el.textContent) || 0;
+  const diff = target - start, steps = 25; let i = 0;
+  const t = setInterval(() => { i++; el.textContent = Math.round(start + diff * (i / steps)); if (i >= steps) clearInterval(t); }, 30);
+}
+setInterval(loadStats, 20000);
+
+// ── EMOJI PICKER ────────────────────────────────────────────────
+const EMOJIS = ['❤️','🔥','👍','😍','🥰','💯','⚡','🎉','🚀','💪','👏','✨','🌟','💎','🤩','❤️‍🔥','🙌','💫','🎯','🏆'];
+let selectedEmoji = '❤️';
+
+function buildEmojiGrid() {
+  const grid = document.getElementById('emoji-grid');
+  grid.innerHTML = EMOJIS.map(e =>
+    `<div class="emoji-chip${e === selectedEmoji ? ' selected' : ''}" onclick="selectEmoji('${e}')">${e}</div>`
+  ).join('');
+}
+
+function selectEmoji(e) {
+  selectedEmoji = e;
+  document.getElementById('custom-emoji').value = '';
+  document.getElementById('custom-preview').textContent = '';
+  buildEmojiGrid();
+}
+
+function onCustomEmoji(val) {
+  if (val.trim()) {
+    selectedEmoji = val.trim();
+    document.getElementById('custom-preview').textContent = val.trim();
+    document.querySelectorAll('.emoji-chip').forEach(c => c.classList.remove('selected'));
+  }
+}
+
+buildEmojiGrid();
+
+// ── FOLLOW BOOST ────────────────────────────────────────────────
+let followOk = 0, followFail = 0, followTotal = 0;
+
+socket.on('follow_progress', ({ num, ok, reason, skipped }) => {
+  followOk   += ok ? 1 : 0;
+  followFail += ok ? 0 : 1;
+  updateFollowLive();
+  appendProgress('follow-list', num, ok, reason, '📢', skipped);
+});
+
+socket.on('follow_done', ({ successCount, failCount, total }) => {
+  showFollowFinal(successCount, failCount, total);
+  document.getElementById('follow-btn').disabled = false;
+  document.getElementById('follow-btn').innerHTML = '⚡ Start Follow Boost';
+});
+
+async function doFollow() {
+  const link = document.getElementById('follow-link').value.trim();
+  const errEl = document.getElementById('follow-err');
+  errEl.classList.remove('show');
+  if (!link) { errEl.textContent = '⚠️ Enter a WhatsApp channel link'; errEl.classList.add('show'); return; }
+
+  // Reset
+  followOk = 0; followFail = 0; followTotal = 0;
+  document.getElementById('follow-list').innerHTML = '';
+  document.getElementById('follow-sum-live').textContent = '';
+  document.getElementById('follow-final').className = 'sum-box';
+  document.getElementById('follow-progress').classList.add('show');
+
+  const btn = document.getElementById('follow-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Boosting…';
+
+  try {
+    const r = await fetch('/api/channel-follow', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelJid: link })
+    });
+    const d = await r.json();
+    if (!d.ok && !d.jid) {
+      errEl.textContent = '❌ ' + (d.error || 'Boost failed');
+      errEl.classList.add('show');
+      btn.disabled = false;
+      btn.innerHTML = '⚡ Start Follow Boost';
+    }
+  } catch(e) {
+    errEl.textContent = '⚠️ Network error. Try again.';
+    errEl.classList.add('show');
+    btn.disabled = false;
+    btn.innerHTML = '⚡ Start Follow Boost';
+  }
+}
+
+function updateFollowLive() {
+  document.getElementById('follow-sum-live').textContent =
+    `✅ ${followOk}  ❌ ${followFail}`;
+}
+
+function showFollowFinal(ok, fail, total) {
+  const box  = document.getElementById('follow-final');
+  const icon = document.getElementById('follow-final-icon');
+  const txt  = document.getElementById('follow-final-text');
+  box.className = 'sum-box show ' + (ok > 0 ? 'ok' : 'fail');
+  icon.textContent = ok > 0 ? '✅' : '❌';
+  txt.innerHTML = `<strong>${ok} / ${total}</strong> sessions followed successfully${fail > 0 ? ` &nbsp;• &nbsp;<span style="color:var(--red)">${fail} failed</span>` : ''}`;
+  loadStats();
+}
+
+// ── REACT BOOST ─────────────────────────────────────────────────
+let reactOk = 0, reactFail = 0;
+
+socket.on('react_progress', ({ num, ok, reason, emoji, skipped }) => {
+  reactOk   += ok ? 1 : 0;
+  reactFail += ok ? 0 : 1;
+  updateReactLive();
+  appendProgress('react-list', num, ok, reason, emoji || '❤️', skipped);
+});
+
+socket.on('react_done', ({ successCount, failCount, total }) => {
+  showReactFinal(successCount, failCount, total);
+  document.getElementById('react-btn').disabled = false;
+  document.getElementById('react-btn').innerHTML = '🎯 Start React Boost';
+});
+
+async function doReact() {
+  const link = document.getElementById('react-link').value.trim();
+  const errEl = document.getElementById('react-err');
+  errEl.classList.remove('show');
+  if (!link) { errEl.textContent = '⚠️ Enter a WhatsApp channel link'; errEl.classList.add('show'); return; }
+
+  // Reset
+  reactOk = 0; reactFail = 0;
+  document.getElementById('react-list').innerHTML = '';
+  document.getElementById('react-sum-live').textContent = '';
+  document.getElementById('react-final').className = 'sum-box';
+  document.getElementById('react-progress').classList.add('show');
+
+  const btn = document.getElementById('react-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Reacting…';
+
+  try {
+    const r = await fetch('/api/channel-react', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: true,
+        channelJid: link,
+        emoji: selectedEmoji,
+        emojis: [selectedEmoji]
+      })
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      errEl.textContent = '❌ ' + (d.error || 'React failed');
+      errEl.classList.add('show');
+      btn.disabled = false;
+      btn.innerHTML = '🎯 Start React Boost';
+    }
+  } catch(e) {
+    errEl.textContent = '⚠️ Network error. Try again.';
+    errEl.classList.add('show');
+    btn.disabled = false;
+    btn.innerHTML = '🎯 Start React Boost';
+  }
+}
+
+function updateReactLive() {
+  document.getElementById('react-sum-live').textContent =
+    `✅ ${reactOk}  ❌ ${reactFail}`;
+}
+
+function showReactFinal(ok, fail, total) {
+  const box  = document.getElementById('react-final');
+  const icon = document.getElementById('react-final-icon');
+  const txt  = document.getElementById('react-final-text');
+  box.className = 'sum-box show ' + (ok > 0 ? 'ok' : 'fail');
+  icon.textContent = ok > 0 ? '✅' : '❌';
+  txt.innerHTML = `<strong>${ok} / ${total}</strong> sessions reacted${fail > 0 ? ` &nbsp;•&nbsp; <span style="color:var(--red)">${fail} failed</span>` : ''}`;
+  loadStats();
+}
+
+// ── HELPER: append progress item ───────────────────────────────
+function appendProgress(listId, num, ok, reason, icon, skipped) {
+  const list = document.getElementById(listId);
+  const cls  = skipped ? 'skip' : (ok ? 'ok' : 'fail');
+  const ico  = skipped ? '⏭️' : (ok ? icon : '❌');
+  const reasonHtml = reason && !ok && !skipped
+    ? `<div class="prog-reason">${reason.slice(0, 60)}</div>` : '';
+  const div = document.createElement('div');
+  div.className = 'prog-item ' + cls;
+  div.innerHTML = `<span class="prog-icon">${ico}</span><div class="prog-num">+${num}</div>${reasonHtml}`;
+  list.appendChild(div);
+  list.scrollTop = list.scrollHeight;
+}
+
+// ── METEORS ─────────────────────────────────────────────────────
+(function(){
+  var container = document.getElementById('meteors');
+  var colors = ['rgba(162,89,255,','rgba(37,211,102,','rgba(0,229,255,'];
+  for(var i=0;i<5;i++){
+    var m=document.createElement('div');m.className='meteor';
+    var c=colors[i%3];
+    m.style.cssText=['left:'+(Math.random()*100)+'vw','height:'+(60+Math.random()*80)+'px','animation-duration:'+(4+Math.random()*8)+'s','animation-delay:'+(Math.random()*10)+'s','background:linear-gradient(180deg,rgba(0,0,0,0),'+c+'0.9),'+c+'0.5),transparent)','transform:rotate('+(10+Math.random()*20)+'deg)'].join(';');
+    container.appendChild(m);
+  }
+})();
+
+// ── BOOT ────────────────────────────────────────────────────────
+checkAuth();
+</script>
+</body>
+</html>
