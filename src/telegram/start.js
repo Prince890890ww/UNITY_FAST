@@ -1,4 +1,10 @@
 'use strict';
+/**
+ * ⚠️  LEGACY FILE — NOT USED
+ * Entry point is /start.js (project root).
+ * Require paths in this file are WRONG for this location.
+ * Do not run or require this file directly.
+ */
 require('dotenv').config({ path: './config.env' });
 const {
   default: makeWASocket,

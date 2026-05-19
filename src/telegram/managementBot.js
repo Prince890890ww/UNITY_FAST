@@ -51,12 +51,12 @@ function _saveBlocked(set) {
 const editState = new Map();
 
 // ── Admin gate ────────────────────────────────────────────────
-const _adminIds = (process.env.TG_ADMIN_IDS || '')
-  .split(',').map(s => s.trim()).filter(Boolean);
-
+// Read at call-time so env var changes + restarts take effect
 function isAdmin(msg) {
-  if (!_adminIds.length) return true;
-  return _adminIds.includes(String(msg.from && msg.from.id ? msg.from.id : msg.from));
+  const ids = (process.env.TG_ADMIN_IDS || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  if (!ids.length) return true;
+  return ids.includes(String(msg.from && msg.from.id ? msg.from.id : msg.from));
 }
 
 // ── Uptime formatter ──────────────────────────────────────────
@@ -563,15 +563,31 @@ function msgFollowDone(jid, total, success, lines) {
 }
 
 // ── Start bot ─────────────────────────────────────────────────
-function start() {
+async function start() {
   const TOKEN = process.env.TG_MGMT_BOT_TOKEN;
   if (!TOKEN) {
     logger.warn('[TG-MGMT] TG_MGMT_BOT_TOKEN not set — management bot disabled');
     return;
   }
 
+  // ── Clear any stuck webhook/session before polling ───────────
+  try {
+    const tempBot = new TelegramBot(TOKEN);
+    await tempBot.deleteWebhook({ drop_pending_updates: true });
+  } catch (e) {
+    logger.warn('[TG-MGMT] deleteWebhook failed: ' + e.message);
+  }
+
   bot = new TelegramBot(TOKEN, { polling: true });
-  bot.on('polling_error', err => logger.error('[TG-MGMT] Polling error: ' + err.message));
+  bot.on('polling_error', err => {
+    logger.error('[TG-MGMT] Polling error: ' + err.message);
+    // ── Auto-restart on fatal polling errors (401, 409) ────────
+    if (err.message && (err.message.includes('401') || err.message.includes('409') || err.message.includes('EFATAL'))) {
+      logger.warn('[TG-MGMT] Fatal polling error — restarting in 5s...');
+      try { bot.stopPolling(); } catch {}
+      setTimeout(start, 5000);
+    }
+  });
 
   // /start
   bot.onText(/^\/start(@\S+)?$/, (msg) => {
@@ -1176,20 +1192,13 @@ function start() {
       }
       return;
     }
-  });
 
-  // ── /edit callback_query handler ─────────────────────────────
-  bot.on('callback_query', async (cb) => {
-    const data   = cb.data || '';
-    if (!data.startsWith('edit_')) return;
-
+  // ── /edit callback_query — merged into single handler ────────
+    if (data.startsWith('edit_')) {
     const fromId = String(cb.from && cb.from.id ? cb.from.id : '');
     if (!EDIT_OWNERS.has(fromId)) {
       return bot.answerCallbackQuery(cb.id, { text: '🔒 Access denied' }).catch(() => {});
     }
-
-    const chatId = cb.message && cb.message.chat && cb.message.chat.id;
-    const msgId  = cb.message && cb.message.message_id;
     await bot.answerCallbackQuery(cb.id).catch(() => {});
 
     // ── Back to session list ─────────────────────────────────
@@ -1546,7 +1555,8 @@ function start() {
       );
       return;
     }
-  });
+    } // end edit_ block
+  }); // end single callback_query handler
 
   logger.info('[TG-MGMT] Management bot started ✅');
 }

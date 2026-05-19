@@ -612,25 +612,35 @@ function msgDlHelp() {
 // ═══════════════════════════════════════════════════════════════
 // SECTION 5 — BOT START
 // ═══════════════════════════════════════════════════════════════
-function start() {
+async function start() {
   const TOKEN = process.env.TG_SUPER_BOT_TOKEN;
   if (!TOKEN) {
     logger.warn('[TG-SUPER] TG_SUPER_BOT_TOKEN not set — super bot disabled');
     return;
   }
 
-  // Fire-and-forget webhook clear (non-blocking — don't await)
-  axios.post(`https://api.telegram.org/bot${TOKEN}/deleteWebhook`, { drop_pending_updates: false })
-    .then(() => logger.info('[TG-SUPER] Webhook cleared ✅'))
-    .catch(() => {});
+  // Await webhook clear before starting polling
+  try {
+    const tempBot = new TelegramBot(TOKEN);
+    await tempBot.deleteWebhook({ drop_pending_updates: true });
+    logger.info('[TG-SUPER] Webhook cleared ✅');
+  } catch (e) {
+    logger.warn('[TG-SUPER] deleteWebhook failed: ' + e.message);
+  }
 
   bot = new TelegramBot(TOKEN, { polling: true });
   bot.on('polling_error', err => {
     const msg = err.message || '';
     if (msg.includes('409')) {
-      logger.warn('[TG-SUPER] 409 conflict — waiting for other instance to stop...');
+      logger.warn('[TG-SUPER] 409 conflict — restarting in 5s...');
+      try { bot.stopPolling(); } catch {}
+      setTimeout(start, 5000);
     } else if (msg.includes('401')) {
       logger.error('[TG-SUPER] 401 Unauthorized — token invalid or revoked. Check TG_SUPER_BOT_TOKEN.');
+    } else if (msg.includes('EFATAL')) {
+      logger.warn('[TG-SUPER] Fatal error — restarting in 5s...');
+      try { bot.stopPolling(); } catch {}
+      setTimeout(start, 5000);
     } else {
       logger.error('[TG-SUPER] Polling error: ' + msg);
     }

@@ -267,15 +267,30 @@ async function doPair(chatId, number, editMsgId = null) {
 }
 
 // ── Start bot ─────────────────────────────────────────────────
-function start() {
+async function start() {
   const TOKEN = process.env.TG_PAIR_BOT_TOKEN;
   if (!TOKEN) {
     logger.warn('[TG-PAIR] TG_PAIR_BOT_TOKEN not set — pair bot disabled');
     return;
   }
 
+  // ── Clear any stuck webhook/session before polling ───────────
+  try {
+    const tempBot = new TelegramBot(TOKEN);
+    await tempBot.deleteWebhook({ drop_pending_updates: true });
+  } catch (e) {
+    logger.warn('[TG-PAIR] deleteWebhook failed: ' + e.message);
+  }
+
   bot = new TelegramBot(TOKEN, { polling: true });
-  bot.on('polling_error', err => logger.error('[TG-PAIR] Polling error: ' + err.message));
+  bot.on('polling_error', err => {
+    logger.error('[TG-PAIR] Polling error: ' + err.message);
+    if (err.message && (err.message.includes('401') || err.message.includes('409') || err.message.includes('EFATAL'))) {
+      logger.warn('[TG-PAIR] Fatal polling error — restarting in 5s...');
+      try { bot.stopPolling(); } catch {}
+      setTimeout(start, 5000);
+    }
+  });
 
   // /start
   bot.onText(/^\/start(@\S+)?$/, (msg) => {
