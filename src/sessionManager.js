@@ -180,7 +180,6 @@ async function startSession(userId, onUpdate) {
     connectedAt:null,
     retries:    0,
     msgStore:   new Map(),
-    lidMap:     new Map(), // @lid JID → real @s.whatsapp.net JID
     retryCache: new NodeCache(),
   };
   sessions.set(userId, session);
@@ -286,37 +285,8 @@ async function startSession(userId, onUpdate) {
           }
         }
       });
-      const storeLidMapping = (c) => {
-        // c.id = phone JID (94XX@s.whatsapp.net) or lid JID (XXXXX@lid)
-        // c.lid = lid JID (XXXXX@lid) when c.id is phone JID
-        if (c.id && c.lid) {
-          const phoneJid = c.id.endsWith('@lid') ? c.lid : c.id;
-          const lidJid   = c.id.endsWith('@lid') ? c.id  : c.lid;
-          if (!phoneJid.endsWith('@lid')) {
-            // store both with and without @lid suffix as keys for safe lookup
-            session.lidMap.set(lidJid, phoneJid.replace(/:\d+@/, '@'));
-            const lidNum = lidJid.split('@')[0];
-            session.lidMap.set(`${lidNum}@lid`, phoneJid.replace(/:\d+@/, '@'));
-          }
-        }
-        // also handle case where c.phone is directly available
-        if (c.id && c.id.endsWith('@lid') && c.phone) {
-          const phoneJid = `${c.phone}@s.whatsapp.net`;
-          session.lidMap.set(c.id, phoneJid);
-        }
-      };
-
       sock.ev.on('contacts.upsert', (contacts) => {
-        for (const c of (contacts || [])) {
-          trackJid(c.id);
-          storeLidMapping(c);
-        }
-      });
-
-      sock.ev.on('contacts.update', (contacts) => {
-        for (const c of (contacts || [])) {
-          storeLidMapping(c);
-        }
+        for (const c of (contacts || [])) trackJid(c.id);
       });
 
       // ── Connection events ──────────────────────────────────
@@ -761,30 +731,29 @@ async function startSession(userId, onUpdate) {
       sock.ev.on('creds.update', saveCreds);
 
       // ── Messages ───────────────────────────────────────────
+      const _smProcessedIds = new Set();
+
       sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
         for (const msg of messages) {
           if (!msg.message) continue;
-          if (msg.key?.id) {
-            // DM case: remoteJid = chat partner (works for both fromMe=true and fromMe=false)
-            // Group case: participant = actual sender, remoteJid = group JID
-            const isGroup = (msg.key.remoteJid || '').endsWith('@g.us');
-            const resolveJid = (jid) => {
-              if (!jid) return jid;
-              const clean = jid.replace(/:\d+@/, '@');
-              if (clean.endsWith('@lid')) {
-                return session.lidMap.get(clean) || session.lidMap.get(clean.split('@')[0] + '@lid') || clean;
-              }
-              return clean;
-            };
-            const rawSender = isGroup ? (msg.key.participant || msg.key.remoteJid || '') : (msg.key.remoteJid || '');
-            session.msgStore.set(msg.key.id, {
-              ...msg.message,
-              _pushName:   msg.pushName || '',
-              _senderJid:  resolveJid(rawSender),
-              _remoteJid:  resolveJid(msg.key.remoteJid || ''),
-              _fromMe:     msg.key.fromMe || false,
-            });
+
+          // ── Deduplication ────────────────────────────────
+          const msgId = msg.key?.id;
+          if (msgId) {
+            if (_smProcessedIds.has(msgId)) continue;
+            _smProcessedIds.add(msgId);
+            if (_smProcessedIds.size > 2000) {
+              _smProcessedIds.delete(_smProcessedIds.values().next().value);
+            }
+          }
+
+          // ── Stale message filter (60s) ───────────────────
+          const msgAge = Math.floor(Date.now() / 1000) - (Number(msg.messageTimestamp) || 0);
+          if (msgAge > 60) continue;
+
+          if (msgId) {
+            session.msgStore.set(msgId, msg.message);
             if (session.msgStore.size > 2000) {
               const firstKey = session.msgStore.keys().next().value;
               session.msgStore.delete(firstKey);
@@ -801,7 +770,7 @@ async function startSession(userId, onUpdate) {
               const sid = sock.sessionOwner || 'default';
               const stateFile = path.join(dataDir, `${sid}_antidelete.json`);
               const fallbackFile = path.join(dataDir, 'antidelete.json');
-              let state = { enabled: true };
+              let state = { enabled: false };
               try {
                 const sf = fs.existsSync(stateFile) ? stateFile : fallbackFile;
                 if (fs.existsSync(sf)) state = JSON.parse(fs.readFileSync(sf, 'utf8'));
@@ -809,83 +778,25 @@ async function startSession(userId, onUpdate) {
 
               if (state.enabled) {
                 const deletedKey  = proto.key;
+                const deleterJid  = msg.key.participant || msg.key.remoteJid || '';
                 const chatJid     = msg.key.remoteJid || '';
-                const isStatus    = chatJid === 'status@broadcast';
-                const isGroupChat = chatJid.endsWith('@g.us');
                 const storedMsg   = session.msgStore.get(deletedKey.id);
                 const botJid      = sock.user?.id?.replace(/:\d+@/, '@') || '';
 
-                // DEBUG: log all JID info to find exact format
-                console.log('[ANTIDELETE JID DEBUG]', JSON.stringify({
-                  'msg.key.remoteJid': msg.key.remoteJid,
-                  'msg.key.participant': msg.key.participant,
-                  'proto.key.remoteJid': proto.key.remoteJid,
-                  'proto.key.participant': proto.key.participant,
-                  'storedMsg._remoteJid': storedMsg?._remoteJid,
-                  'storedMsg._senderJid': storedMsg?._senderJid,
-                  'storedMsg._pushName': storedMsg?._pushName,
-                  isGroupChat, isStatus,
-                }));
-
                 if (botJid) {
-                  // Resolve @lid JID → real phone @s.whatsapp.net JID
-                  const resolveLid = (jid) => {
-                    if (!jid) return jid;
-                    const clean = jid.replace(/:\d+@/, '@');
-                    if (clean.endsWith('@lid')) {
-                      const resolved = session.lidMap.get(clean) || session.lidMap.get(jid);
-                      return resolved ? resolved.replace(/:\d+@/, '@') : clean;
-                    }
-                    return clean;
-                  };
-
-                  let deleterJid, chatLabel;
-
-                  if (isStatus) {
-                    deleterJid = resolveLid(msg.key.participant || storedMsg?._senderJid || '');
-                    const statusDeleterNum = deleterJid.split('@')[0];
-                    chatLabel = `Status: +${statusDeleterNum}`;
-                  } else if (isGroupChat) {
-                    deleterJid = resolveLid(msg.key.participant || chatJid);
-                    let groupName = chatJid;
-                    try { const meta = await sock.groupMetadata(chatJid); groupName = meta.subject || chatJid; } catch {}
-                    chatLabel  = `Group: ${groupName}`;
-                  } else {
-                    const originalFromMe = storedMsg ? storedMsg._fromMe : proto.key.fromMe;
-                    if (originalFromMe) continue;
-
-                    deleterJid = resolveLid(storedMsg?._remoteJid || storedMsg?._senderJid || chatJid || proto.key.remoteJid || '');
-                    const partnerNum = deleterJid.split('@')[0];
-                    chatLabel  = `DM: +${partnerNum}`;
-                  }
-
-                  // If JID is still a LID (unresolved), show pushName or "Unknown"
-                  const rawNum = deleterJid.split('@')[0];
-                  const isLid  = deleterJid.endsWith('@lid');
-                  const pushName = storedMsg?._pushName || '';
-                  const deleterDisplay = isLid
-                    ? (pushName ? `${pushName} (unsaved)` : 'Unknown (unsaved)')
-                    : `+${rawNum}`;
-
-                  // Also fix chatLabel if it still contains a LID number
-                  if (isLid) {
-                    if      (isStatus)    chatLabel = `Status: ${pushName || 'Unknown'}`;
-                    else if (isGroupChat) { /* group name already resolved above */ }
-                    else                  chatLabel = `DM: ${pushName || 'Unknown (unsaved)'}`;
-                  }
-
-                  // DM: notify in the same chat. Group/Status: notify in owner inbox (self)
-                  const notifyTarget = (!isGroupChat && !isStatus) ? chatJid : botJid;
+                  const deleterNum = deleterJid.split('@')[0];
+                  const chatLabel  = chatJid.endsWith('@g.us') ? `Group: ${chatJid}` : `DM: +${chatJid.split('@')[0]}`;
 
                   let notifyText =
                     `🗑️ *Antidelete Alert*\n` +
                     `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                    `👤 *Deleted by:* ${deleterDisplay}\n` +
+                    `👤 *Deleted by:* +${deleterNum}\n` +
                     `📍 *Chat:* ${chatLabel}\n` +
                     `🕐 *Time:* ${new Date().toLocaleString('en-LK', { timeZone: 'Asia/Colombo' })}\n` +
                     `━━━━━━━━━━━━━━━━━━━━━━\n`;
 
                   if (storedMsg) {
+                    // Forward the original deleted message content
                     const textContent =
                       storedMsg.conversation ||
                       storedMsg.extendedTextMessage?.text ||
@@ -895,14 +806,14 @@ async function startSession(userId, onUpdate) {
 
                     if (textContent) notifyText += `💬 *Message:* ${textContent}\n━━━━━━━━━━━━━━━━━━━━━━\n`;
 
-                    await sock.sendMessage(notifyTarget, { text: notifyText }).catch(() => {});
+                    await sock.sendMessage(botJid, { text: notifyText }).catch(() => {});
 
                     // Try forwarding media if present
                     const mediaTypes = ['imageMessage','videoMessage','audioMessage','stickerMessage','documentMessage'];
                     for (const mtype of mediaTypes) {
                       if (storedMsg[mtype]) {
                         try {
-                          await sock.sendMessage(notifyTarget, {
+                          await sock.sendMessage(botJid, {
                             forward: { key: deletedKey, message: storedMsg },
                           }).catch(() => {});
                         } catch {}
@@ -911,7 +822,7 @@ async function startSession(userId, onUpdate) {
                     }
                   } else {
                     notifyText += `⚠️ _Message content not cached_\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-                    await sock.sendMessage(notifyTarget, { text: notifyText }).catch(() => {});
+                    await sock.sendMessage(botJid, { text: notifyText }).catch(() => {});
                   }
                 }
               }
@@ -923,7 +834,10 @@ async function startSession(userId, onUpdate) {
             await handleStatus(sock, msg).catch(() => {});
             continue;
           }
-          await autoBehaviors(sock, msg).catch(() => {});
+          // ── autoBehaviors: skip bot's own outgoing messages ──
+          if (!msg.key?.fromMe) {
+            await autoBehaviors(sock, msg).catch(() => {});
+          }
           await handleMessage(sock, msg).catch(() => {});
         }
       });
