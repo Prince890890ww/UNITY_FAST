@@ -2,9 +2,9 @@
 /**
  * UNITY-MD — Meta AI Forward Context Plugin
  * දාන්නෙ: src/commands/metaai_forward.js
- * 
+ *
  * Commands:
- *   .metaai [text]   → Meta AI forwarded message විදිහට send කරනවා
+ *   .metaai [text]      → Meta AI forwarded message විදිහට send කරනවා
  *   .statusreply [text] → Fake status reply context විදිහට send කරනවා
  *   .metastatus [text]  → දෙකම combine කරලා send කරනවා
  */
@@ -14,40 +14,41 @@ const cfg = require('../../config');
 // ── Meta AI Official Newsletter JID ──────────────────────────
 const META_AI_JID = '120363166619088141@newsletter';
 
+// ── Random stanza ID helper (WhatsApp 2026 fix) ───────────────
+function genStanzaId() {
+  return '3EB0' + [...Array(16)]
+    .map(() => Math.floor(Math.random() * 16).toString(16).toUpperCase())
+    .join('');
+}
+
 // ── Build Meta AI forward contextInfo ────────────────────────
 function metaAIContext() {
   return {
     isForwarded: true,
     forwardingScore: 1,
     forwardedNewsletterMessageInfo: {
-      newsletterJid: META_AI_JID,
-      newsletterName: 'Unity Status',
-      serverMessageId: -1,
+      newsletterJid:   META_AI_JID,
+      newsletterName:  'Meta AI',                               // ✅ corrected
+      serverMessageId: Math.floor(Math.random() * 9e8) + 1e7,  // ✅ random positive int
     },
   };
 }
 
 // ── Build fake status reply contextInfo ──────────────────────
 function statusReplyContext(senderJid, msgKey, originalMsg) {
-  return {
-    remoteJid: 'status@broadcast',
-    fromMe: false,
-    participant: senderJid,
-    stanzaId: msgKey?.id || '',
-    quotedMessage: originalMsg || {
-      imageMessage: {
-        url: '',
-        mimetype: 'image/jpeg',
-        caption: '',
-        fileLength: 0,
-        height: 1280,
-        width: 720,
-        mediaKey: Buffer.alloc(32),
-        fileEncSha256: Buffer.alloc(32),
-        fileSha256: Buffer.alloc(32),
-        directPath: '',
-      },
+  // WhatsApp 2026: quotedMessage must NOT have empty Buffers
+  const _quotedFallback = {
+    extendedTextMessage: {          // ✅ text node instead of broken imageMessage
+      text: 'Wait loading menu...',
     },
+  };
+
+  return {
+    remoteJid:     'status@broadcast',
+    fromMe:        false,
+    participant:   senderJid,
+    stanzaId:      msgKey?.id || genStanzaId(),  // ✅ never empty
+    quotedMessage: originalMsg || _quotedFallback,
   };
 }
 
