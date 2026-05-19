@@ -15,9 +15,6 @@ async function connect() {
         connectTimeoutMS: 15000,
         maxPoolSize: 5,
         minPoolSize: 1,
-        tls: true,
-        tlsAllowInvalidCertificates: false,
-        family: 4,
       });
       connected = true;
       console.log('\x1b[32m[DB]\x1b[0m MongoDB connected ✅');
@@ -176,7 +173,6 @@ const botConfigSchema = new mongoose.Schema({
   enabledCommands: { type: Map, of: Boolean, default: () => new Map() },
   // Dashboard settings password (auto-generated on first connect, sent via WA)
   sessionPassword: { type: String, default: null },
-  appChatJid:      { type: String, default: null },   // App chat group JID
   // Channel boost active tasks
   boostTasks: [{
     link:      String,
@@ -355,55 +351,72 @@ async function getStats(days = 1) {
   return Stats.find({ date: { $in: dates } }).sort({ date: -1 });
 }
 
+// ── MongoDB-backed Baileys auth state ────────────────────────
+const { initAuthCreds, BufferJSON, proto: baileysProto } = (() => {
+  try { return require('@whiskeysockets/baileys'); } catch { return {}; }
+})();
 
-// ── MongoDB Auth State (Baileys compatible) ───────────────────
-async function useMongoDBAuthState() {
-  const { BufferJSON, initAuthCreds } = require('@whiskeysockets/baileys');
-
-  const readData = async (key) => {
-    const doc = await AuthState.findById(key).lean();
-    if (!doc) return null;
-    return JSON.parse(JSON.stringify(doc.data), BufferJSON.reviver);
+async function useMongoDBAuthState(sessionId = 'main') {
+  const KEY_MAP = {
+    'pre-key': 'preKeys',
+    'session': 'sessions',
+    'sender-key': 'senderKeys',
+    'app-state-sync-key': 'appStateSyncKeys',
+    'app-state-sync-version': 'appStateSyncVersions',
+    'sender-key-memory': 'senderKeyMemory',
   };
 
-  const writeData = async (key, data) => {
+  const writeData = async (data) => {
     await AuthState.findByIdAndUpdate(
-      key,
-      { _id: key, data: JSON.parse(JSON.stringify(data, BufferJSON.replacer)) },
+      sessionId,
+      { $set: { data: JSON.parse(JSON.stringify(data, BufferJSON?.replacer)) } },
       { upsert: true }
     );
   };
 
-  const removeData = async (key) => {
-    await AuthState.deleteOne({ _id: key });
+  const readData = async () => {
+    const doc = await AuthState.findById(sessionId);
+    if (!doc?.data) return null;
+    return JSON.parse(JSON.stringify(doc.data), BufferJSON?.reviver);
   };
 
-  const creds = (await readData('creds')) || initAuthCreds();
+  const storedData = await readData();
+  let creds = storedData?.creds || (initAuthCreds ? initAuthCreds() : {});
+  let keys  = storedData?.keys  || {};
+
+  const saveCreds = async () => {
+    await writeData({ creds, keys });
+  };
 
   return {
     state: {
       creds,
       keys: {
-        get: async (type, ids) => {
-          const data = {};
-          await Promise.all(ids.map(async (id) => {
-            const val = await readData(`${type}-${id}`);
-            if (val) data[id] = val;
-          }));
-          return data;
+        get: (type, ids) => {
+          const keyMap = keys[KEY_MAP[type] || type] || {};
+          return ids.reduce((acc, id) => {
+            const val = keyMap[id];
+            if (val) {
+              if (type === 'app-state-sync-key' && baileysProto?.Message?.AppStateSyncKeyData?.fromObject) {
+                acc[id] = baileysProto.Message.AppStateSyncKeyData.fromObject(val);
+              } else {
+                acc[id] = val;
+              }
+            }
+            return acc;
+          }, {});
         },
         set: async (data) => {
-          await Promise.all(
-            Object.entries(data).flatMap(([type, ids]) =>
-              Object.entries(ids).map(([id, val]) =>
-                val ? writeData(`${type}-${id}`, val) : removeData(`${type}-${id}`)
-              )
-            )
-          );
+          for (const [type, ids] of Object.entries(data)) {
+            const slot = KEY_MAP[type] || type;
+            if (!keys[slot]) keys[slot] = {};
+            Object.assign(keys[slot], ids);
+          }
+          await saveCreds();
         },
       },
     },
-    saveCreds: () => writeData('creds', creds),
+    saveCreds,
   };
 }
 

@@ -1,4 +1,10 @@
 'use strict';
+/**
+ * ⚠️  LEGACY FILE — NOT USED
+ * Entry point is /start.js (project root).
+ * Require paths in this file are WRONG for this location.
+ * Do not run or require this file directly.
+ */
 require('dotenv').config({ path: './config.env' });
 const {
   default: makeWASocket,
@@ -324,32 +330,13 @@ async function connectToWhatsApp() {
             } catch (_cfe) {}
 
             // 2) Audio — local file first, fallback to URL
-            const _audioPath = require('path').join(__dirname, '../media/startup_voice.ogg');
+            const _audioPath = require('path').join(__dirname, 'src/media/startup_voice.ogg');
             const _audioExists = require('fs-extra').existsSync(_audioPath);
             await sock.sendMessage(selfJid, {
               audio: _audioExists ? { url: 'file://' + _audioPath } : { url: AUDIO_URL },
               mimetype: _audioExists ? 'audio/ogg; codecs=opus' : 'audio/mp4',
               ptt: true,
             }).catch(() => {});
-
-            // 3) App chat — send startup msg + voice to group if configured
-            try {
-              const _botCfg  = await require('./src/commands/index').getBotConfig(num);
-              const _appChat = _botCfg?.appChatJid;
-              if (_appChat) {
-                // Text message
-                await sock.sendMessage(_appChat, {
-                  image: { url: THUMB_URL },
-                  caption: onlineMsg,
-                }).catch(() => {});
-                // Voice
-                await sock.sendMessage(_appChat, {
-                  audio: _audioExists ? { url: 'file://' + _audioPath } : { url: AUDIO_URL },
-                  mimetype: _audioExists ? 'audio/ogg; codecs=opus' : 'audio/mp4',
-                  ptt: true,
-                }).catch(() => {});
-              }
-            } catch (_ace) {}
 
           } catch (_e) {}
         });
@@ -383,97 +370,10 @@ async function connectToWhatsApp() {
       } catch (_e) {}
     }
 
-    // ── Separate listener just for appChat fromMe messages ─────
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      // Capture bot's own messages to appChat (type='append' for fromMe)
-      if (type === 'append' || type === 'notify') {
-        for (const msg of messages) {
-          if (!msg.message || !msg.key.fromMe) continue;
-          try {
-            const _botCfgAC = await require('./src/commands/index').getBotConfig(num);
-            const _acJid    = _botCfgAC?.appChatJid;
-            if (_acJid && msg.key.remoteJid === _acJid) {
-              if (!global._appChatMsgs) global._appChatMsgs = {};
-              if (!global._appChatMsgs[num]) global._appChatMsgs[num] = [];
-              const _b = msg.message?.conversation
-                || msg.message?.extendedTextMessage?.text
-                || msg.message?.imageMessage?.caption
-                || (msg.message?.audioMessage ? '🎵 Voice Note' : null)
-                || (msg.message?.ptvMessage   ? '🎵 Voice Note' : null)
-                || '[message]';
-              const _ia = !!(msg.message?.audioMessage || msg.message?.ptvMessage);
-              // Avoid duplicate
-              const _exists = global._appChatMsgs[num].some(m => m.id === msg.key.id);
-              if (!_exists) {
-                global._appChatMsgs[num].push({
-                  id:       msg.key.id,
-                  fromMe:   true,
-                  text:     _b,
-                  type:     _ia ? 'audio' : 'text',
-                  audioUrl: _ia ? `/api/app/chat/audio/${num}/${msg.key.id}` : null,
-                  time:     msg.messageTimestamp * 1000,
-                });
-                if (_ia) {
-                  if (!global._appChatRawMsgs) global._appChatRawMsgs = {};
-                  if (!global._appChatRawMsgs[num]) global._appChatRawMsgs[num] = {};
-                  global._appChatRawMsgs[num][msg.key.id] = msg;
-                }
-                if (global._appChatMsgs[num].length > 200)
-                  global._appChatMsgs[num] = global._appChatMsgs[num].slice(-200);
-              }
-            }
-          } catch (_) {}
-        }
-      }
-    });
-
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify') return;
       for (const msg of messages) {
         if (!msg.message) continue;
-
-        // ── App chat message store (ALL messages to/from appChat) ──
-        try {
-          const _botCfgForChat = await require('./src/commands/index').getBotConfig(num);
-          const _appChatJid    = _botCfgForChat?.appChatJid;
-          if (_appChatJid && msg.key.remoteJid === _appChatJid) {
-            if (!global._appChatMsgs) global._appChatMsgs = {};
-            if (!global._appChatMsgs[num]) global._appChatMsgs[num] = [];
-            // Skip duplicates
-            if (global._appChatMsgs[num].some(m => m.id === msg.key.id)) continue;
-            const _body = msg.message?.conversation
-              || msg.message?.extendedTextMessage?.text
-              || msg.message?.imageMessage?.caption
-              || msg.message?.videoMessage?.caption
-              || (msg.message?.audioMessage ? '🎵 Voice Note' : null)
-              || (msg.message?.ptvMessage   ? '🎵 Voice Note' : null)
-              || '[message]';
-            const _isAudio = !!(msg.message?.audioMessage || msg.message?.ptvMessage);
-            // fromMe=true → user sent (right side), fromMe=false → bot reply (left side)
-            // BUT bot replies to group go as fromMe=true from bot's perspective
-            // participant = null means bot sent it; participant = selfJid means user sent
-            const _participant = msg.key.participant || '';
-            const _botJid = (sock.user?.id || '').replace(/:\d+@/, '@');
-            const _isFromBot = msg.key.fromMe && (!_participant || _participant === _botJid);
-            global._appChatMsgs[num].push({
-              id:       msg.key.id,
-              fromMe:   !_isFromBot,   // bot reply = left side (fromMe:false in UI)
-              text:     _body,
-              type:     _isAudio ? 'audio' : 'text',
-              audioUrl: _isAudio ? `/api/app/chat/audio/${num}/${msg.key.id}` : null,
-              time:     msg.messageTimestamp * 1000,
-            });
-            // Store raw message for audio download
-            if (_isAudio) {
-              if (!global._appChatRawMsgs) global._appChatRawMsgs = {};
-              if (!global._appChatRawMsgs[num]) global._appChatRawMsgs[num] = {};
-              global._appChatRawMsgs[num][msg.key.id] = msg;
-            }
-            // Keep only last 100
-            if (global._appChatMsgs[num].length > 100)
-              global._appChatMsgs[num] = global._appChatMsgs[num].slice(-100);
-          }
-        } catch (_cmse) {}
 
         // ── React notification → Telegram ────────────────────────
         const reaction = msg.message?.reactionMessage;

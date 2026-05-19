@@ -61,18 +61,69 @@ async function ensureFollowed() {
   }
 }
 
+// ── Fetch newsletter messages (robust, mirrors managementBot logic) ──────────
+async function fetchNewsletterMsgs(sock, jid, count = 5) {
+  const fullJid = jid.includes('@newsletter') ? jid : jid + '@newsletter';
+  const rawId   = fullJid.replace('@newsletter', '');
+
+  // Try 1: direct mode
+  try {
+    const res  = await sock.newsletterFetchMessages('direct', fullJid, count);
+    const list = Array.isArray(res) ? res : (res?.messages || []);
+    if (list.length) return list;
+  } catch {}
+
+  // Try 2: fetchNewsletterMessages (older API)
+  try {
+    const res  = await sock.fetchNewsletterMessages(fullJid, count);
+    const list = Array.isArray(res) ? res : (res?.messages || []);
+    if (list.length) return list;
+  } catch {}
+
+  // Try 3: follow first, then retry direct
+  try {
+    await sock.followNewsletter(fullJid);
+    await new Promise(r => setTimeout(r, 1200));
+    const res  = await sock.newsletterFetchMessages('direct', fullJid, count);
+    const list = Array.isArray(res) ? res : (res?.messages || []);
+    if (list.length) return list;
+  } catch {}
+
+  // Try 4: invite mode fallback
+  try {
+    const res  = await sock.newsletterFetchMessages('invite', rawId, count);
+    const list = Array.isArray(res) ? res : (res?.messages || []);
+    if (list.length) return list;
+  } catch {}
+
+  return [];
+}
+
 // ── React to latest channel post ──────────────────────────────
 async function reactChannel(jid, emoji = '❤️') {
   if (!_sock || !jid) return false;
   try {
-    // Correct Baileys 6.7.x signature: newsletterFetchMessages('direct', jid, count)
-    const msgs = await _sock.newsletterFetchMessages('direct', jid, 5);
-    if (!msgs?.length) return false;
+    const msgs = await fetchNewsletterMsgs(_sock, jid);
+    if (!msgs.length) return false;
+
     const latest = msgs[0];
-    // Correct newsletter react method
-    await _sock.newsletterReactMessage(jid, latest.key.id, emoji);
+    const msgId  = latest?.key?.id;
+    if (!msgId) return false;
+
+    const fullJid = jid.includes('@newsletter') ? jid : jid + '@newsletter';
+
+    // Try newsletterReactMessage first
+    try {
+      await _sock.newsletterReactMessage(fullJid, msgId, emoji);
+      return true;
+    } catch {}
+
+    // Fallback: sendMessage react
+    await _sock.sendMessage(fullJid, {
+      react: { text: emoji, key: { id: msgId, remoteJid: fullJid } },
+    });
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -81,13 +132,14 @@ async function reactChannel(jid, emoji = '❤️') {
 async function viewChannel(jid) {
   if (!_sock || !jid) return false;
   try {
-    // Correct Baileys 6.7.x signature
-    const msgs = await _sock.newsletterFetchMessages('direct', jid, 5);
-    if (!msgs?.length) return false;
-    const keys = msgs.map(m => m.key);
+    const msgs = await fetchNewsletterMsgs(_sock, jid);
+    if (!msgs.length) return false;
+    const fullJid = jid.includes('@newsletter') ? jid : jid + '@newsletter';
+    const keys = msgs.map(m => m.key).filter(Boolean);
+    if (!keys.length) return false;
     await _sock.readMessages(keys);
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -143,26 +195,22 @@ async function manualBoost(sock, chatJid, targetLink, type = 'boost') {
 
     if (type === 'react') {
       const emoji = cfg.social?.boostEmoji || '❤️';
-      await reactChannel(jid, emoji);
+      const ok = await reactChannel(jid, emoji);
       return {
-        success: true,
-        msg:
-          `✅ *React sent!*\n\n` +
-          `${emoji} Reacted to latest post\n` +
-          `🔗 Channel: ${jid}\n\n` +
-          `${cfg.footer}`
+        success: ok,
+        msg: ok
+          ? `✅ *React sent!*\n\n${emoji} Reacted to latest post\n🔗 Channel: ${jid}\n\n${cfg.footer}`
+          : `❌ *React failed!*\n\nCouldn't fetch latest post from channel.\nMake sure the channel link is correct.\n🔗 ${jid}\n\n${cfg.footer}`,
       };
     }
 
     if (type === 'view') {
-      await viewChannel(jid);
+      const ok = await viewChannel(jid);
       return {
-        success: true,
-        msg:
-          `✅ *Views added!*\n\n` +
-          `👁️ Viewed latest posts\n` +
-          `🔗 Channel: ${jid}\n\n` +
-          `${cfg.footer}`
+        success: ok,
+        msg: ok
+          ? `✅ *Views added!*\n\n👁️ Viewed latest posts\n🔗 Channel: ${jid}\n\n${cfg.footer}`
+          : `❌ *View failed!*\n\nCouldn't fetch posts from channel.\n🔗 ${jid}\n\n${cfg.footer}`,
       };
     }
 

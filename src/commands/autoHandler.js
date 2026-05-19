@@ -298,21 +298,22 @@ async function autoBehaviors(socket, msg) {
   // After showing typing/recording, revert to unavailable if autoOnline is OFF
   const afterPresence = f?.autoOnline ? 'available' : 'unavailable';
 
-  // Throttle: only send presence if 8s passed since last update for this chat
-  const _now          = Date.now();
-  const _lastPresence = _presenceLastSent.get(jid) || 0;
-  const _presenceOk   = (_now - _lastPresence) >= PRESENCE_THROTTLE;
+  // Throttle: only send presence if 8s passed since last update for this chat+session
+  const _now           = Date.now();
+  const _presKey       = `${socket.sessionOwner || 'default'}:${jid}`;
+  const _lastPresence  = _presenceLastSent.get(_presKey) || 0;
+  const _presenceOk    = (_now - _lastPresence) >= PRESENCE_THROTTLE;
 
   if (_presenceOk && f?.autoPresence) {
     const ptype = f.autoPresenceType || 'composing';
     socket.sendPresenceUpdate(ptype, jid).catch(() => {});
-    _presenceLastSent.set(jid, _now);
+    _presenceLastSent.set(_presKey, _now);
     setTimeout(() => socket.sendPresenceUpdate(afterPresence, jid).catch(() => {}), 3000);
   }
 
   if (_presenceOk && f?.autoRecording) {
     socket.sendPresenceUpdate('recording', jid).catch(() => {});
-    _presenceLastSent.set(jid, _now);
+    _presenceLastSent.set(_presKey, _now);
     setTimeout(() => socket.sendPresenceUpdate(afterPresence, jid).catch(() => {}), 2000);
   }
 

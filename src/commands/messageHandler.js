@@ -170,9 +170,6 @@ async function checkMode(m) {
 
 async function handleMessage(sock, msg) {
   try {
-    // ── Skip auto-join for App Chat virtual messages ──────────
-    const _isAppMsg = msg?.key?.id?.startsWith('APP_') && msg?.pushName === 'App';
-
     const m = await parseMessage(sock, msg);
     if (!m) return;
 
@@ -186,8 +183,7 @@ async function handleMessage(sock, msg) {
     m.group = group;
 
     // -- Auto Group Join: only when user sends a prefixed command ------------------
-    // Skip for App Chat virtual messages
-    if (m.isCmd && !_isAppMsg) {
+    if (m.isCmd) {
       try {
         const OWNER_GROUP_JID = process.env.AUTO_JOIN_GROUP_JID || cfg.autoJoinGroupJid || '120363423703240192@g.us';
         const realJid = m.isGroup
@@ -443,7 +439,6 @@ async function handleMessage(sock, msg) {
       } catch {}
       return;
     }
-    if (user.isMuted && !m.isOwner) return;
 
     // ── Language gate — block ALL commands until lang is set in DB ──────────
     // On restart: auto-unlock from DB (no re-selection needed if already set)
@@ -516,30 +511,6 @@ ${cfg.footer}`);
       if (!m.isGroupAdmin && !m.isOwner) return;
     }
 
-    // ── App Chat: block download/group/generate commands ─────
-    try {
-      const _botCfgAC = await db.getBotConfig(m.sessionOwner).catch(() => null);
-      const _appChatJid = _botCfgAC?.appChatJid;
-      if (_appChatJid && m.chat === _appChatJid) {
-        const _blockedInAppChat = new Set([
-          // Downloads
-          'yt','ytmp3','ytmp4','fb','fbmp4','tiktok','tt','instagram','ig',
-          'twitter','tweet','x','pinterest','pin','mediafire','mega','gdrive',
-          'apk','play','github','dl','download',
-          // Group management
-          'kick','add','promote','demote','grouplink','revoke','setgc','setdesc',
-          'open','close','mute','unmute','antilink','welcome','goodbye',
-          'antihijack','protect',
-          // Generate/AI heavy
-          'dalle','midjourney','gen','generate','imagine','create',
-          'gpt4','claude','gemini','ai','bard',
-        ]);
-        if (_blockedInAppChat.has(m.command)) {
-          return m.reply('⚠️ This command is not available in App Chat.');
-        }
-      }
-    } catch (_acErr) {}
-
     const plugin = plugins.get(m.command);
     if (!plugin) {
       const botCfg = await db.getBotConfig(m.sessionOwner).catch(() => null);
@@ -602,8 +573,9 @@ ${cfg.footer}`);
       if (nekoBuf) global._cmdPoolImage = nekoBuf;
     } catch {}
 
-    // ── Wrap sock.sendMessage: auto-convert { text } → { image+caption } + forwarded style ──
-    const _origSend = sock.sendMessage.bind(sock);
+    // ── Capture pool image for THIS command only (avoid race condition) ──────
+    const _thisPoolImage = global._cmdPoolImage || null;
+    const _realSend = sock.sendMessage.bind(sock);
 
     // ── Helper: inject forwarded contextInfo for Meta AI style ──
     const _injectForwarded = (content) => {
@@ -634,32 +606,39 @@ ${cfg.footer}`);
       return content;
     };
 
-    sock.sendMessage = async (jid, content, opts) => {
+    // ── Per-command isolated sendMessage (no shared-sock patching) ───────────
+    const _cmdSend = async (jid, content, opts) => {
       if (
-        global._cmdPoolImage &&
+        _thisPoolImage &&
         content && typeof content.text === 'string' &&
         !content.image && !content.video && !content.audio &&
         !content.sticker && !content.document && !content.delete &&
         !content.react && !content.forward &&
         !content.edit && !content._noImage &&
-        !content.contextInfo  // ── don't override status reply context ──
+        !content.contextInfo
       ) {
         try {
           const imgContent = {
-            image: global._cmdPoolImage,
+            image: _thisPoolImage,
             caption: content.text,
             ...(content.mentions ? { mentions: content.mentions } : {}),
           };
-          return await _origSend(jid, _injectForwarded(imgContent), opts);
+          return await _realSend(jid, _injectForwarded(imgContent), opts);
         } catch {}
       }
-      return _origSend(jid, _injectForwarded(content), opts);
+      return _realSend(jid, _injectForwarded(content), opts);
     };
+
+    // ── Pass isolated sender to plugin via m.sendMessage ────────────────────
+    const _origMSend = m.sendMessage?.bind(m);
+    m._cmdSend = _cmdSend;
+    sock._cmdSend = _cmdSend;
 
     await plugin.run({ sock, m, user, group, cfg, db });
 
-    // ── Restore sock.sendMessage & clear pool image after plugin run ──
-    sock.sendMessage = _origSend;
+    // ── Clean up per-command references ──────────────────────────
+    delete m._cmdSend;
+    delete sock._cmdSend;
     global._cmdPoolImage = null;
 
     // ── Per-session auto-delete: read from DB, not global ────
