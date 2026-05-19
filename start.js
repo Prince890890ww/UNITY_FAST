@@ -15,6 +15,7 @@ const pino = require('pino');
 const chalk = require('chalk');
 const fs = require('fs-extra');
 const NodeCache = require('node-cache');
+const axios = require('axios');
 const cfg = require('./config');
 const FORWARD_CHANNEL_JID = '120363419201971095@newsletter';
 const db = require('./src/commands/index');
@@ -45,9 +46,9 @@ const messageStore = new Map();
 const msgRetryCounterCache = new NodeCache();
 let sock = null;
 let retryCount      = 0;
-const MAX_RETRIES   = 9999;         // never give up — Railway restarts constantly
-const BASE_DELAY_MS = 2_000;        // 2s first retry
-const MAX_DELAY_MS  = 30_000;       // cap at 30s (not 5min — Railway needs fast recovery)
+const MAX_RETRIES   = 10;           // give up after 10 consecutive fails
+const BASE_DELAY_MS = 3_000;        // 3s first retry
+const MAX_DELAY_MS  = 300_000;      // cap at 5 min
 
 function getReconnectDelay() {
   // Exponential backoff with jitter: 3s, 6s, 12s … up to 5min
@@ -59,16 +60,13 @@ function getReconnectDelay() {
 
 function safeReconnect(label = '') {
   retryCount++;
-  // After 15 consecutive fails, reset counter + wait 10s and try fresh
-  // Never fully stop — Railway env requires persistent reconnect
-  if (retryCount > 15) {
-    console.log(chalk.yellow(`[CONN] ${retryCount} retries — resetting backoff and trying fresh in 10s...`));
-    retryCount = 0;
-    setTimeout(() => connectToWhatsApp(), 10_000);
+  if (retryCount > MAX_RETRIES) {
+    console.error(chalk.red(`[CONN] ${MAX_RETRIES} consecutive reconnect failures — stopping to protect session.`));
+    console.error(chalk.red('[CONN] Restart the process manually.'));
     return;
   }
   const delay = getReconnectDelay();
-  console.log(chalk.yellow(`[CONN] ${label} — retry ${retryCount} in ${Math.round(delay/1000)}s`));
+  console.log(chalk.yellow(`[CONN] ${label} — retry ${retryCount}/${MAX_RETRIES} in ${Math.round(delay/1000)}s`));
   setTimeout(() => connectToWhatsApp(), delay);
 }
 let pairingStarted = false;
@@ -95,6 +93,10 @@ async function connectToWhatsApp() {
     const { version } = await fetchLatestBaileysVersion();
     const logger = pino({ level: 'silent' });
 
+    // ── Read autoOnline from DB so it respects .autoonline command ──
+    const _botCfg    = await db.getBotConfig('config').catch(() => null);
+    const _autoOnline = _botCfg?.features?.autoOnline ?? cfg.features?.autoOnline ?? false;
+
     sock = makeWASocket({
       version,
       logger,
@@ -107,7 +109,7 @@ async function connectToWhatsApp() {
       keepAliveIntervalMs: 10000,
       maxRetries: 10,
       generateHighQualityLinkPreview: false,
-      markOnlineOnConnect: cfg.features?.autoOnline || false,
+      markOnlineOnConnect: _autoOnline,
       printQRInTerminal: false,
       transactionOpts: {
         maxCommitRetries: 10,
@@ -125,7 +127,7 @@ async function connectToWhatsApp() {
         const stored = messageStore.get(key.id);
         return stored || proto.Message.fromObject({});
       },
-      browser: ['UNITY-MD', 'Chrome', '120.0.0'],
+      browser: Browsers.baileys('Desktop'),
     });
 
     global.unitySock = sock;
@@ -242,7 +244,6 @@ async function connectToWhatsApp() {
         const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
         console.log(chalk.red(`[CONN] Closed — code: ${reason}`));
         if (pairingInterval) { clearInterval(pairingInterval); pairingInterval = null; }
-        if (global._keepAliveInterval) { clearInterval(global._keepAliveInterval); global._keepAliveInterval = null; }
 
         if (reason === DisconnectReason.connectionLost) {
           safeReconnect('Connection lost');
@@ -261,15 +262,12 @@ async function connectToWhatsApp() {
           retryCount = 0;
           setTimeout(() => connectToWhatsApp(), 60000);
         } else if (reason === DisconnectReason.forbidden) {
-          console.log(chalk.red('❌ Forbidden — waiting 30s before reconnect...'));
+          console.log(chalk.red('❌ Forbidden — waiting 5min before reconnect...'));
           retryCount = 0;
-          setTimeout(() => connectToWhatsApp(), 30_000);
+          setTimeout(() => connectToWhatsApp(), 300000);
         } else if (reason === DisconnectReason.multideviceMismatch) {
-          retryCount = 0;
           safeReconnect('Multi-device mismatch');
         } else {
-          // Unknown reason — reset counter and reconnect fresh
-          retryCount = 0;
           safeReconnect(`Unknown (${reason})`);
         }
         return;
@@ -280,19 +278,6 @@ async function connectToWhatsApp() {
         pairingStarted = false;
         if (pairingInterval) { clearInterval(pairingInterval); pairingInterval = null; }
         global.unitySock = sock;
-
-        // ── Keep-alive ping: every 25s send unavailable presence ──
-        // Prevents Railway/WA from silently dropping idle socket
-        if (global._keepAliveInterval) clearInterval(global._keepAliveInterval);
-        global._keepAliveInterval = setInterval(async () => {
-          try {
-            if (sock?.ws?.readyState === 1) {
-              await sock.sendPresenceUpdate('unavailable').catch(() => {});
-            } else {
-              console.log(chalk.yellow('[KEEPALIVE] Socket not ready — skipping ping'));
-            }
-          } catch (_kae) {}
-        }, 25_000);
 
         // ── Register main bot in sessionManager so mgmt bot can use it ──
         try {
@@ -307,21 +292,6 @@ async function connectToWhatsApp() {
         const num = user?.id?.split(':')[0];
         console.log(chalk.green(`\n[✅] Connected: ${user?.name} (+${num})`));
         console.log(chalk.cyan(`[🧲] UNITY-MD LIVE — ${plugins.size}+ commands\n`));
-
-        // ── Set bot profile picture on startup ───────────────────
-        setTimeout(async () => {
-          try {
-            const fs = require('fs');
-            const iconPath = require('path').join(__dirname, 'src', 'media', 'unity_thumb.jpg');
-            if (fs.existsSync(iconPath)) {
-              const imgBuffer = fs.readFileSync(iconPath);
-              await sock.updateProfilePicture(sock.user.id, imgBuffer);
-              console.log(chalk.green('[✅] Profile picture updated'));
-            }
-          } catch (ppErr) {
-            console.log(chalk.yellow('[PP] Profile picture update skipped:', ppErr.message));
-          }
-        }, 10_000);
 
         const os = require('os');
         const onlineMsg =
@@ -419,10 +389,28 @@ async function connectToWhatsApp() {
       } catch (_e) {}
     }
 
+    // ── Processed message IDs — prevent duplicate processing on reconnect ──
+    const _processedMsgIds = new Set();
+
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify') return;
       for (const msg of messages) {
         if (!msg.message) continue;
+
+        // ── Deduplication: skip already-processed message IDs ────
+        const msgId = msg.key?.id;
+        if (msgId) {
+          if (_processedMsgIds.has(msgId)) continue;
+          _processedMsgIds.add(msgId);
+          if (_processedMsgIds.size > 2000) {
+            const first = _processedMsgIds.values().next().value;
+            _processedMsgIds.delete(first);
+          }
+        }
+
+        // ── Stale message filter: skip messages older than 60s ───
+        const msgAge = Math.floor(Date.now() / 1000) - (Number(msg.messageTimestamp) || 0);
+        if (msgAge > 60) continue;
 
         // ── React notification → Telegram ────────────────────────
         const reaction = msg.message?.reactionMessage;
@@ -435,8 +423,8 @@ async function connectToWhatsApp() {
           await notifyReactionTelegram(msg.key.remoteJid, reaction.text, msgText);
         }
 
-        if (msg.key?.id) {
-          messageStore.set(msg.key.id, msg.message);
+        if (msgId) {
+          messageStore.set(msgId, msg.message);
           if (messageStore.size > 1000) {
             const firstKey = messageStore.keys().next().value;
             messageStore.delete(firstKey);
@@ -446,7 +434,10 @@ async function connectToWhatsApp() {
           await handleStatus(sock, msg);
           continue;
         }
-        await autoBehaviors(sock, msg);
+        // ── autoBehaviors: skip bot's own outgoing messages ──────
+        if (!msg.key?.fromMe) {
+          await autoBehaviors(sock, msg);
+        }
         await handleMessage(sock, msg);
       }
     });
@@ -516,21 +507,17 @@ async function main() {
   startDashboard(sm);
 
   // ── Telegram bots ─────────────────────────────────────────
-  startPairBot().catch(e => console.error("[TG-PAIR] Start failed:", e.message));
-  startMgmtBot().catch(e => console.error("[TG-MGMT] Start failed:", e.message));
+  try { startPairBot(); } catch (e) { console.error('[TG-PAIR] Start failed:', e.message); }
+  try { startMgmtBot(); } catch (e) { console.error('[TG-MGMT] Start failed:', e.message); }
 }
 
 main();
 
 process.on('uncaughtException', e => {
   console.error(chalk.red('[UNCAUGHT]'), e.message);
-  // If sock is dead, try reconnect after 5s
-  if (!sock || !global.unitySock) {
-    console.log(chalk.yellow('[UNCAUGHT] Socket appears dead — attempting reconnect in 5s...'));
-    retryCount = 0;
-    setTimeout(() => connectToWhatsApp(), 5_000);
-  }
+  // Don't exit — let reconnect logic handle recovery
 });
 process.on('unhandledRejection', e => {
   console.error(chalk.red('[UNHANDLED]'), e?.message || e);
+  // Don't exit — log and continue
 });
