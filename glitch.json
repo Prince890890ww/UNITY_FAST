@@ -1,0 +1,7 @@
+{
+  "install": "npm install",
+  "start": "node index.js",
+  "watch": {
+    "ignore": [".git", "node_modules"]
+  }
+}
