@@ -1,11 +1,5 @@
 'use strict';
-/**
- * UNITY-MD — Multi-User Session Manager
- * Handles 99999+ independent WhatsApp sessions
- * Each user gets their own Baileys socket + MongoDB auth state
- */
-
-// ── Suppress noisy Baileys crypto errors from flooding logs ───
+// ── Suppress noisy Baileys crypto errors ──────────────────────
 const _origStderr = process.stderr.write.bind(process.stderr);
 process.stderr.write = (chunk, ...args) => {
   const s = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
@@ -18,6 +12,11 @@ console.error = (...args) => {
   if (msg.includes('Bad MAC') || msg.includes('Session error') || msg.includes('verifyMAC')) return;
   _origConsoleError(...args);
 };
+/**
+ * BOT — Multi-User Session Manager
+ * Handles 99999+ independent WhatsApp sessions
+ * Each user gets their own Baileys socket + MongoDB auth state
+ */
 
 const {
   default: makeWASocket,
@@ -36,12 +35,9 @@ const db           = require('./commands/index');
 const { handleMessage, loadPlugins, plugins } = require('./commands/messageHandler');
 const { handleGroupJoin, handleGroupLeave }   = require('./commands/groupHandler');
 const { autoBehaviors, handleStatus, handleCall } = require('./commands/autoHandler');
-
-const { tgNotify } = require('./telegram/notify');
-// clearAllChatsOnStartup removed — was auto-running on every startup and deleting chats unintentionally
 const logger       = require('./commands/logger');
 
-// ── Safe newsletter follow — treats Baileys response parse errors as success ──
+// ── Safe newsletter follow ────────────────────────────────────
 async function _safeFollow(sock, jid) {
   if (!sock || !jid) return false;
   try {
@@ -49,20 +45,10 @@ async function _safeFollow(sock, jid) {
     return true;
   } catch (e) {
     const _m = e.message || '';
-    if (
-      _m.includes('unexpected response structure') ||
-      _m.includes('unexpected response') ||
-      _m.includes('result is not') ||
-      _m.includes('Cannot read') ||
-      _m.includes('undefined')
-    ) {
-      return true; // WA follow succeeded, Baileys just failed to parse response
-    }
+    if (_m.includes('unexpected response') || _m.includes('result is not') || _m.includes('Cannot read') || _m.includes('undefined')) return true;
     return false;
   }
 }
-
-
 
 // ── Per-user AuthState Schema ─────────────────────────────────
 const userAuthSchema = new mongoose.Schema({
@@ -119,30 +105,13 @@ async function getUserAuthState(userId) {
       keys: {
         get: async (type, ids) => {
           const result = {};
-          // Batch read all keys at once instead of individual queries
-          const docIds = ids.map(id => `${userId}:${type}-${id}`);
-          try {
-            const docs = await UserAuthState.find({ _id: { $in: docIds } }).lean();
-            const docMap = {};
-            for (const d of docs) docMap[d._id] = d;
-            for (const id of ids) {
-              const doc = docMap[`${userId}:${type}-${id}`];
-              if (!doc) { result[id] = undefined; continue; }
-              let value = JSON.parse(JSON.stringify(doc.data), BufferJSON.reviver);
-              if (type === 'app-state-sync-key' && value) {
-                value = proto.Message.AppStateSyncKeyData.fromObject(value);
-              }
-              result[id] = value;
+          await Promise.all(ids.map(async (id) => {
+            let value = await readData(`${type}-${id}`);
+            if (type === 'app-state-sync-key' && value) {
+              value = proto.Message.AppStateSyncKeyData.fromObject(value);
             }
-          } catch {
-            // fallback: individual reads
-            await Promise.all(ids.map(async (id) => {
-              result[id] = await readData(`${type}-${id}`);
-              if (type === 'app-state-sync-key' && result[id]) {
-                result[id] = proto.Message.AppStateSyncKeyData.fromObject(result[id]);
-              }
-            }));
-          }
+            result[id] = value;
+          }));
           return result;
         },
         set: async (data) => {
@@ -187,14 +156,13 @@ async function startSession(userId, onUpdate) {
   async function connect() {
     try {
       const { state, saveCreds } = await getUserAuthState(userId);
-      // Fallback version if network request fails (e.g. Railway restrictions)
       let version;
       try {
         const vResult = await fetchLatestBaileysVersion();
         version = vResult.version;
       } catch (e) {
         logger.warn(`[SESSION] fetchLatestBaileysVersion failed, using fallback: ${e.message}`);
-        version = [2, 3000, 1015901307]; // stable fallback version
+        version = [2, 3000, 1015901307];
       }
       const silentLogger         = pino({ level: 'silent' });
 
@@ -203,53 +171,39 @@ async function startSession(userId, onUpdate) {
         logger: silentLogger,
         msgRetryCounterCache: session.retryCache,
         syncFullHistory:       false,
-        maxMsgRetryCount:      3,
-        connectTimeoutMs:      30000,
-        keepAliveIntervalMs:   25000,
-        retryRequestDelayMs:   250,
+        maxMsgRetryCount:      3,           // speed: fewer retries
+        connectTimeoutMs:      30000,        // speed: faster timeout
+        keepAliveIntervalMs:   25000,        // speed: less ping overhead
+        retryRequestDelayMs:   250,          // speed: fast retry
         generateHighQualityLinkPreview: false,
         markOnlineOnConnect:   false,
         printQRInTerminal:     false,
-        fireInitQueries:       false,
-        emitOwnEvents:         false,
-
+        fireInitQueries:       false,        // speed: skip init queries
+        emitOwnEvents:         false,        // speed: skip own event processing
         auth: {
           creds: state.creds,
           keys:  makeCacheableSignalKeyStore(state.keys, silentLogger),
         },
-
         getMessage: async (key) => session.msgStore.get(key.id) || proto.Message.fromObject({}),
-
         browser: ['Ubuntu', 'Chrome', '20.0.04'],
       });
 
       session.sock = sock;
-      sock.sessionOwner = userId; // per-session isolation
-      sock._chatJids   = new Set(); // all known chat JIDs
-      sock._lastMsgMap = {};        // jid -> { key, messageTimestamp }
+      sock.sessionOwner = userId;
+      sock._chatJids   = new Set();
+      sock._lastMsgMap = {};
 
       // ── Polyfill: sock.downloadMediaMessage ───────────────
-      // Many plugins call sock.downloadMediaMessage(msg) but Baileys
-      // removed this method — it's now a standalone import.
-      // Patching it here fixes all plugins at once.
-      // NOTE: reuploadRequest intentionally omitted — sock.updateMediaMessage
-      // triggers config.getConfigFromSocket internally which causes crashes.
       {
         const { downloadMediaMessage: _dlMedia } = require('@whiskeysockets/baileys');
         sock.downloadMediaMessage = (msg) => _dlMedia(msg, 'buffer', {}, {
-          logger: {
-            info: () => {}, error: () => {}, warn: () => {},
-            child: () => ({ info: () => {}, error: () => {}, warn: () => {}, debug: () => {} }),
-            debug: () => {},
-          },
+          logger: { info: () => {}, error: () => {}, warn: () => {}, child: () => ({ info: () => {}, error: () => {}, warn: () => {}, debug: () => {} }), debug: () => {} },
         });
       }
 
-      // ── Track chat JIDs from every possible event ──────────
+      // ── Track chat JIDs ────────────────────────────────────
       const trackJid = (jid) => {
-        if (jid && typeof jid === 'string' && !jid.endsWith('@broadcast')) {
-          sock._chatJids.add(jid);
-        }
+        if (jid && typeof jid === 'string' && !jid.endsWith('@broadcast')) sock._chatJids.add(jid);
       };
       sock.ev.on('chats.set', ({ chats }) => {
         sock._chatList = chats || [];
@@ -262,38 +216,23 @@ async function startSession(userId, onUpdate) {
           }
         }
       });
-      sock.ev.on('chats.upsert', (newChats) => {
-        for (const c of (newChats || [])) trackJid(c.id);
-      });
-      sock.ev.on('messages.upsert', ({ messages }) => {
-        for (const msg of (messages || [])) {
-          const jid = msg?.key?.remoteJid;
-          trackJid(jid);
-          if (jid && msg?.messageTimestamp) {
-            sock._lastMsgMap[jid] = { key: msg.key, messageTimestamp: msg.messageTimestamp };
-          }
-        }
-      });
-      sock.ev.on('contacts.upsert', (contacts) => {
-        for (const c of (contacts || [])) trackJid(c.id);
-      });
+      sock.ev.on('chats.upsert', (newChats) => { for (const c of (newChats || [])) trackJid(c.id); });
+      sock.ev.on('contacts.upsert', (contacts) => { for (const c of (contacts || [])) trackJid(c.id); });
 
       // ── Connection events ──────────────────────────────────
       sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
 
         // Generate pair code when connecting + not yet registered
         if ((connection === 'connecting' || !!qr) && !sock.authState.creds.registered && !session.pairCode) {
-          // ── REDEPLOY GUARD: check DB creds before requesting pair ──
-          // If DB has real creds (me.id or registered), skip pair — Baileys
-          // will connect on 'open' once WA confirms the session.
+          // ── REDEPLOY GUARD ────────────────────────────────
           let _dbHasCreds = false;
           try {
             const _doc = await UserAuthState.findById(`${userId}:creds`).lean();
             if (_doc?.data?.registered || _doc?.data?.me?.id) _dbHasCreds = true;
           } catch {}
           if (_dbHasCreds) {
-            logger.info(`[SESSION] ${userId} creds.registered=false but DB has valid creds — skipping pair code (waiting for WA to confirm)`);
-            return; // WA will reconnect on its own; no pair needed
+            logger.info(`[SESSION] ${userId} creds exist in DB — skipping pair (waiting for WA confirm)`);
+            return;
           }
 
           session.status = STATUS.PAIRING;
@@ -330,7 +269,7 @@ async function startSession(userId, onUpdate) {
           session.status = STATUS.DISCONNECTED;
           if (onUpdate) onUpdate(userId, { status: STATUS.DISCONNECTED, reason });
 
-          // If this was a manual stop/restart, do NOT clear auth — just exit
+          // If manual stop, preserve auth
           if (session._manualStop) {
             logger.info(`[SESSION] ${userId} closed intentionally — auth preserved`);
             return;
@@ -339,29 +278,21 @@ async function startSession(userId, onUpdate) {
           const noRetry = [
             DisconnectReason.loggedOut,
             DisconnectReason.forbidden,
-            // NOTE: badSession removed — Railway restarts cause false badSession codes.
-            // Only truly permanent disconnects should clear auth.
+            // badSession removed — redeploy causes false badSession
           ];
 
           if (noRetry.includes(reason)) {
-            // ── REDEPLOY PROTECTION ─────────────────────────────────
-            // Railway/Render redeploy කරද්දී Baileys sometimes fires loggedOut
-            // as a false positive. Before clearing auth, check if DB still has
-            // valid creds. If yes → retry instead of wiping the session.
+            // ── REDEPLOY PROTECTION ──────────────────────────
             let hasDbCreds = false;
             try {
               const _credsDoc = await UserAuthState.findById(`${userId}:creds`).lean();
-              // Check that creds exist AND have a me/registered field (real session)
-              if (_credsDoc?.data?.registered || _credsDoc?.data?.me?.id) {
-                hasDbCreds = true;
-              }
+              if (_credsDoc?.data?.registered || _credsDoc?.data?.me?.id) hasDbCreds = true;
             } catch {}
 
             if (hasDbCreds && reason === DisconnectReason.loggedOut) {
-              // Likely a false-positive from redeploy — retry with backoff
               session.retries++;
               const delay = session.retries <= 5 ? 15000 : 60000;
-              logger.warn(`[SESSION] ${userId} got loggedOut but DB creds exist — likely redeploy false-positive, retrying in ${delay/1000}s (retry ${session.retries})`);
+              logger.warn(`[SESSION] ${userId} loggedOut but DB creds exist — redeploy false-positive, retry in ${delay/1000}s`);
               setTimeout(() => connect(), delay);
             } else {
               logger.warn(`[SESSION] ${userId} logged out/forbidden — clearing session`);
@@ -369,13 +300,11 @@ async function startSession(userId, onUpdate) {
               if (onUpdate) onUpdate(userId, { status: STATUS.ERROR, reason });
             }
           } else {
-            // ── Always retry — never give up on a paired session ──
-            // WA stays linked even if bot disconnects temporarily.
-            // Cap at 120s between retries after first 10 attempts.
+            // ── Always retry indefinitely ────────────────────
             session.retries++;
             const delay = session.retries <= 10
               ? Math.min(5000 + session.retries * 8000, 90000)
-              : 120000; // retry every 2 min indefinitely
+              : 120000;
             logger.info(`[SESSION] ${userId} reconnecting in ${Math.round(delay/1000)}s (retry ${session.retries})`);
             setTimeout(() => connect(), delay);
           }
@@ -389,90 +318,46 @@ async function startSession(userId, onUpdate) {
           logger.success(`[SESSION] ${userId} connected ✅`);
           if (onUpdate) onUpdate(userId, { status: STATUS.CONNECTED, number: userId });
 
-          // ── Mode is now read from DB per-session in checkMode() ─
-          // setBotMode() was removed because it set a global variable
-          // that caused all sessions to share the same mode.
-
           // ── Auto join group + startup msg — ONCE ONLY per session ──
           if (!session.startupDone) {
             session.startupDone = true;
             setTimeout(async () => {
               const moment = require('moment-timezone');
               const now = moment().tz(cfg.timezone || 'Asia/Colombo');
-              // Use sock.user?.id to get the real JID (avoids :XX suffix issues)
-              const rawBotJid = sock.user?.id || (userId + '@s.whatsapp.net');
-              const botJid = rawBotJid.includes('@') ? rawBotJid.replace(/:\d+@/, '@') : rawBotJid + '@s.whatsapp.net';
-
-              // ── DB Stats for startup ───────────────────────────────
-              let _totalUsers = 0, _pairedUsers = 0, _bannedUsers = 0, _totalGroups = 0, _activeToday = 0;
-              try {
-                const _since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-                [_totalUsers, _pairedUsers, _bannedUsers, _totalGroups, _activeToday] = await Promise.all([
-                  db.User.countDocuments(),
-                  db.User.countDocuments({ isPaired: true }),
-                  db.User.countDocuments({ isBanned: true }),
-                  db.Group.countDocuments(),
-                  db.User.countDocuments({ lastCommand: { $gte: _since24h } }),
-                ]);
-              } catch (e) {}
-
-              const _uptime = process.uptime();
-              const _uptimeStr = _uptime < 60
-                ? `${Math.floor(_uptime)}s`
-                : _uptime < 3600
-                  ? `${Math.floor(_uptime / 60)}m ${Math.floor(_uptime % 60)}s`
-                  : `${Math.floor(_uptime / 3600)}h ${Math.floor((_uptime % 3600) / 60)}m`;
-              const _mem = process.memoryUsage();
-              const _ramMB = (_mem.rss / 1024 / 1024).toFixed(1);
-              const _heapMB = (_mem.heapUsed / 1024 / 1024).toFixed(1);
-              const _ramPct = Math.min(Math.round((_mem.rss / 1024 / 1024) / 512 * 10), 10);
-              const _bar = (n, t) => '█'.repeat(n) + '░'.repeat(t - n);
+              const botJid = userId + '@s.whatsapp.net';
 
               const startupMsg =
-                `┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                `┃  🧲  *UNITY-MD ACTIVATED*  🧩  ┃\n` +
-                `┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
-                `╭──────────────────────────╮\n` +
-                `│  📡  *CONNECTION INFO*\n` +
-                `│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n` +
-                `│  👤  *Number :*  +${userId}\n` +
-                `│  📅  *Date   :*  ${now.format('ddd, DD MMM YYYY')}\n` +
-                `│  🕐  *Time   :*  ${now.format('HH:mm:ss')} (SL)\n` +
-                `│  ⏱️  *Uptime :*  ${_uptimeStr}\n` +
-                `╰──────────────────────────╯\n\n` +
-                `╭──────────────────────────╮\n` +
-                `│  💻  *SYSTEM STATUS*\n` +
-                `│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n` +
-                `│  🧠  *RAM :*  ${_ramMB} MB\n` +
-                `│  ▕${_bar(_ramPct, 10)}▏  ${_ramPct * 10}%\n` +
-                `│  📦  *Heap:*  ${_heapMB} MB\n` +
-                `│  ⚙️  *Node:*  ${process.version}\n` +
-                `│  📲  *Cmds:*  ${plugins.size}+\n` +
-                `╰──────────────────────────╯\n\n` +
-                `╭──────────────────────────╮\n` +
-                `│  🗄️  *DATABASE*\n` +
-                `│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n` +
-                `│  👥  *Total Users  :*  ${_totalUsers}\n` +
-                `│  🔗  *Paired       :*  ${_pairedUsers}\n` +
-                `│  ⚡  *Active (24h) :*  ${_activeToday}\n` +
-                `│  🚫  *Banned       :*  ${_bannedUsers}\n` +
-                `│  👥  *Groups       :*  ${_totalGroups}\n` +
-                `╰──────────────────────────╯\n\n` +
-                `╭──────────────────────────╮\n` +
-                `│  ✅  *STATUS*\n` +
-                `│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n` +
-                `│  🟢  Bot is *ONLINE* & ready\n` +
-                `│  🔑  Prefix: *.* or */\n` +
-                `│  💡  Type *.menu* for commands\n` +
-                `╰──────────────────────────╯\n\n` +
+                `╔══════════════════════════╗\n` +
+                `║  🧲  *${cfg.botName} ACTIVATED*  🧩  ║\n` +
+                `╚══════════════════════════╝\n\n` +
+                `👤 *Connected:* +${userId}\n` +
+                `📅 *Date:* ${now.format('ddd, DD MMM YYYY')}\n` +
+                `🕐 *Time:* ${now.format('HH:mm')} (SL)\n\n` +
+                `✅ *Bot is now active!*\n` +
+                `📦 Commands: 350+\n` +
+                `🔑 Prefix: *.* or */\n\n` +
+                `💡 Type *.menu* to see all features\n\n` +
                 `◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢\n` +
-                `❪❪ UNITY-MD ❫❫ | ® UNITY TEAM`;
+                `❪❪ ${cfg.botName} ❫❫ | ® ${cfg.ownerName}`;
 
               // ── STEP 1: Follow channel ──────────────────────────────
-              {
-                const _fOk = await _safeFollow(sock, '120363419201971095@newsletter');
-                if (_fOk) logger.info(`[SESSION] ${userId} followed channel`);
-                else logger.warn(`[SESSION] ${userId} channel follow failed`);
+              const channelUrl = process.env.AUTO_JOIN_CHANNEL || '';
+              if (channelUrl) {
+                try {
+                  let channelJid = '';
+                  if (channelUrl.includes('@newsletter')) {
+                    channelJid = channelUrl;
+                  } else {
+                    const match = channelUrl.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
+                    if (match) channelJid = `${match[1]}@newsletter`;
+                  }
+                  if (channelJid) {
+                    await sock.followNewsletter(channelJid);
+                    logger.info(`[SESSION] ${userId} followed channel`);
+                  }
+                } catch (e) {
+                  logger.warn(`[SESSION] Channel follow failed: ${e.message}`);
+                }
               }
 
               // ── STEP 2: Join group ──────────────────────────────────
@@ -482,39 +367,15 @@ async function startSession(userId, onUpdate) {
                 try {
                   const code = groupLink.split('/').pop()?.split('?')[0];
                   if (code) {
-                    // ── groupGetInviteInfo FIRST (fails if bot already joined) ──
-                    if (!groupJid) {
-                      const info = await sock.groupGetInviteInfo(code).catch(() => null);
-                      if (info?.id) {
-                        groupJid = info.id;
-                      }
-                    }
-
-                    // ── Join (ok to fail if already member) ──────────────────
                     await sock.groupAcceptInvite(code).catch(() => {});
-
-                    // ── Fallback: scan joined groups if JID still unknown ─────
-                    if (!groupJid) {
-                      try {
-                        const joined = await sock.groupFetchAllParticipating();
-                        // Match by invite code in group invite URL
-                        for (const [jid, meta] of Object.entries(joined || {})) {
-                          try {
-                            const inv = await sock.groupInviteCode(jid).catch(() => null);
-                            if (inv && inv === code) { groupJid = jid; break; }
-                          } catch {}
-                        }
-                      } catch {}
-                    }
-
-                    if (groupJid) {
+                    const info = await sock.groupGetInviteInfo(code).catch(() => null);
+                    if (info?.id) {
+                      groupJid = info.id;
                       // Global හා env ට save — messageHandler auto-add ට use වෙනවා
                       global.autoJoinGroupJid = groupJid;
                       process.env.AUTO_JOIN_GROUP_JID = groupJid;
-                      logger.info(`[SESSION] ${userId} group JID resolved: ${groupJid}`);
-                    } else {
-                      logger.warn(`[SESSION] Could not resolve group JID from link`);
                     }
+                    logger.info(`[SESSION] ${userId} joined group: ${groupJid}`);
                   }
                 } catch (e) {
                   logger.warn(`[SESSION] Group join failed: ${e.message}`);
@@ -525,226 +386,47 @@ async function startSession(userId, onUpdate) {
                 global.autoJoinGroupJid = groupJid;
               }
 
-              // ── STEP 3: Startup OR Restart message ─────────────────
-              // langSet=true  → bot was active before → RESTART message
-              // langSet=false → first time            → ACTIVATION + lang select
-              try {
-                const db     = require('./commands/index');
-                const botCfg = await db.getBotConfig(userId);
-
-                if (botCfg.langSet) {
-                  // ══════════════════════════════════════════════
-                  //  🔄  RESTART MESSAGE  (previously active bot)
-                  // ══════════════════════════════════════════════
-                  const uptime   = process.uptime();
-                  const uptimeStr = uptime < 60
-                    ? `${Math.floor(uptime)}s`
-                    : uptime < 3600
-                      ? `${Math.floor(uptime / 60)}m ${Math.floor(uptime % 60)}s`
-                      : `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`;
-
-                  const bar  = (n, total, fill = '█', empty = '░') =>
-                    fill.repeat(n) + empty.repeat(total - n);
-                  const mem  = process.memoryUsage();
-                  const ramMB = (mem.rss / 1024 / 1024).toFixed(1);
-                  const heapMB = (mem.heapUsed / 1024 / 1024).toFixed(1);
-                  const ramPct   = Math.min(Math.round((mem.rss / 1024 / 1024) / 512 * 10), 10);
-                  const ramBar   = bar(ramPct, 10);
-
-                  // ── DB Stats ──────────────────────────────────────
-                  let rTotalUsers = 0, rPairedUsers = 0, rBannedUsers = 0, rTotalGroups = 0, rActiveToday = 0;
-                  try {
-                    const rSince24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-                    [rTotalUsers, rPairedUsers, rBannedUsers, rTotalGroups, rActiveToday] = await Promise.all([
-                      db.User.countDocuments(),
-                      db.User.countDocuments({ isPaired: true }),
-                      db.User.countDocuments({ isBanned: true }),
-                      db.Group.countDocuments(),
-                      db.User.countDocuments({ lastCommand: { $gte: rSince24h } }),
-                    ]);
-                  } catch (e) {}
-
-                  const restartMsg =
-                    `┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n` +
-                    `┃  🔄  *UNITY-MD RESTARTED*  🔄  ┃\n` +
-                    `┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n` +
-                    `╭──────────────────────────╮\n` +
-                    `│  📡  *CONNECTION INFO*\n` +
-                    `│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n` +
-                    `│  👤  *Number :*  +${userId}\n` +
-                    `│  📅  *Date   :*  ${now.format('ddd, DD MMM YYYY')}\n` +
-                    `│  🕐  *Time   :*  ${now.format('HH:mm:ss')} (SL)\n` +
-                    `│  ⏱️  *Uptime :*  ${uptimeStr}\n` +
-                    `╰──────────────────────────╯\n\n` +
-                    `╭──────────────────────────╮\n` +
-                    `│  💻  *SYSTEM STATUS*\n` +
-                    `│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n` +
-                    `│  🧠  *RAM :*  ${ramMB} MB\n` +
-                    `│  ▕${ramBar}▏  ${ramPct * 10}%\n` +
-                    `│  📦  *Heap:*  ${heapMB} MB\n` +
-                    `│  ⚙️  *Node:*  ${process.version}\n` +
-                    `│  📲  *Cmds:*  ${plugins.size}+\n` +
-                    `╰──────────────────────────╯\n\n` +
-                    `╭──────────────────────────╮\n` +
-                    `│  🗄️  *DATABASE*\n` +
-                    `│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n` +
-                    `│  👥  *Total Users  :*  ${rTotalUsers}\n` +
-                    `│  🔗  *Paired       :*  ${rPairedUsers}\n` +
-                    `│  ⚡  *Active (24h) :*  ${rActiveToday}\n` +
-                    `│  🚫  *Banned       :*  ${rBannedUsers}\n` +
-                    `│  👥  *Groups       :*  ${rTotalGroups}\n` +
-                    `╰──────────────────────────╯\n\n` +
-                    `╭──────────────────────────╮\n` +
-                    `│  ✅  *STATUS*\n` +
-                    `│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n` +
-                    `│  🟢  Bot is *ONLINE* & ready\n` +
-                    `│  🔑  Prefix: *.* or */\n` +
-                    `│  💡  Type *.menu* for commands\n` +
-                    `╰──────────────────────────╯\n\n` +
-                    `◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢\n` +
-                    `❪❪ UNITY-MD ❫❫ | ® UNITY TEAM`;
-
-                  // ── TG Notify only on restart (no WhatsApp inbox message/voice) ──
-                  logger.info(`[SESSION] Restart detected for +${userId} — sending TG notify only`);
-                  {
-                    const _upSec = process.uptime();
-                    const _upStr = _upSec < 60
-                      ? `${Math.floor(_upSec)}s`
-                      : _upSec < 3600
-                        ? `${Math.floor(_upSec / 60)}m ${Math.floor(_upSec % 60)}s`
-                        : `${Math.floor(_upSec / 3600)}h ${Math.floor((_upSec % 3600) / 60)}m`;
-                    const _mem    = process.memoryUsage();
-                    const _ramMB  = (_mem.rss / 1024 / 1024).toFixed(1);
-                    const _heapMB = (_mem.heapUsed / 1024 / 1024).toFixed(1);
-                    const _ramPct = Math.min(Math.round((_mem.rss / 1024 / 1024) / 512 * 100), 100);
-                    const _bar    = (n, t) => '█'.repeat(Math.round(n/10)) + '░'.repeat(t - Math.round(n/10));
-                    const _ramBar = _bar(_ramPct, 10);
-
-                    // DB stats
-                    let _tUsers = 0, _tPaired = 0, _tBanned = 0, _tGroups = 0, _tActive = 0;
-                    try {
-                      const _since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-                      [_tUsers, _tPaired, _tBanned, _tGroups, _tActive] = await Promise.all([
-                        db.User.countDocuments(),
-                        db.User.countDocuments({ isPaired: true }),
-                        db.User.countDocuments({ isBanned: true }),
-                        db.Group.countDocuments(),
-                        db.User.countDocuments({ lastCommand: { $gte: _since } }),
-                      ]);
-                    } catch (_e) {}
-
-                    const _tgRestartMsg =
-                      `🔄 <b>UNITY-MD — BOT RESTARTED ✅</b>\n` +
-                      `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-                      `📡 <b>CONNECTION INFO</b>\n` +
-                      `├ 📱 <b>Number:</b> <code>+${userId}</code>\n` +
-                      `├ 📅 <b>Date:</b> ${now.format('ddd, DD MMM YYYY')}\n` +
-                      `├ 🕐 <b>Time:</b> ${now.format('HH:mm:ss')} (SL)\n` +
-                      `└ ⏱️ <b>Uptime:</b> ${_upStr}\n\n` +
-                      `💻 <b>SYSTEM STATUS</b>\n` +
-                      `├ 🧠 <b>RAM:</b> ${_ramMB} MB\n` +
-                      `├ ▕${_ramBar}▏ ${_ramPct}%\n` +
-                      `├ 📦 <b>Heap:</b> ${_heapMB} MB\n` +
-                      `├ ⚙️ <b>Node:</b> ${process.version}\n` +
-                      `└ 📲 <b>Cmds:</b> ${plugins ? plugins.size : '?'}+\n\n` +
-                      `🗄️ <b>DATABASE</b>\n` +
-                      `├ 👥 <b>Total Users:</b> ${_tUsers}\n` +
-                      `├ 🔗 <b>Paired:</b> ${_tPaired}\n` +
-                      `├ ⚡ <b>Active (24h):</b> ${_tActive}\n` +
-                      `├ 🚫 <b>Banned:</b> ${_tBanned}\n` +
-                      `└ 👥 <b>Groups:</b> ${_tGroups}\n\n` +
-                      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                      `<i>❪❪ UNITY-MD ❫❫ | ® UNITY TEAM</i>`;
-                    tgNotify(_tgRestartMsg).catch(() => {});
-                  }
-
-                } else {
-                  // ══════════════════════════════════════════════
-                  //  🧲  FIRST-TIME ACTIVATION MESSAGE
-                  // ══════════════════════════════════════════════
-                  const _THUMB = 'https://i.ibb.co/W4zwVktH/1777104289725.jpg';
-                  const _AUDIO = 'https://files.catbox.moe/zmkssv.mp3';
-                  const _sCh = '120363419201971095@newsletter';
-                  const _sUrl = `https://whatsapp.com/channel/120363419201971095`;
-
-                  // 1) Image + startup text — forwarded from channel style
-                  await sock.sendMessage(botJid, {
-                    image: { url: _THUMB },
-                    caption: startupMsg,
-                    contextInfo: {
-                    isForwarded: true,
-                    forwardingScore: 1,
-                    forwardedNewsletterMessageInfo: {
-                      newsletterJid:   '120363419201971095@newsletter',
-                      newsletterName:  'UNITY-MD',
-                      serverMessageId: -1,
-                    },
-                  },
-                  }).catch(() => sock.sendMessage(botJid, { text: startupMsg }).catch(() => {}));
-
-                  // 2) Audio — local OGG Opus file (WhatsApp PTT format)
-                  try {
-                    const fs   = require('fs');
-                    const path = require('path');
-                    const audioBuffer = fs.readFileSync(
-                      path.join(__dirname, 'media', 'startup_voice.ogg')
-                    );
-                    await sock.sendMessage(botJid, {
-                      audio: audioBuffer,
-                      mimetype: 'audio/ogg; codecs=opus',
-                      ptt: true,
-                    });
-                  } catch (e) {
-                    logger.warn(`[SESSION] Audio send failed: ${e.message}`);
-                  }
-
-                  // 3) Follow newsletter
-                  await _safeFollow(sock, _sCh);
-
-                  logger.info(`[SESSION] Startup message sent to own inbox (+${userId})`);
-
-                  // ── TG Notify: first-time activation ─────────────────────
-                  {
-                    const _mem  = process.memoryUsage();
-                    const _ram  = (_mem.rss / 1024 / 1024).toFixed(1);
-                    const _tgStartMsg =
-                      `🟢 <b>UNITY-MD — NEW BOT CONNECTED! ✅</b>\n` +
-                      `━━━━━━━━━━━━━━━━━━━━\n` +
-                      `📱 <b>Number:</b> <code>+${userId}</code>\n` +
-                      `🧠 <b>RAM:</b> ${_ram} MB\n` +
-                      `⚙️ <b>Node:</b> ${process.version}\n` +
-                      `📅 <b>Date:</b> ${now.format('DD/MM/YYYY HH:mm:ss')} (SL)\n` +
-                      `━━━━━━━━━━━━━━━━━━━━\n` +
-                      `💡 First-time activation — language select sent.\n` +
-                      `<i>❪❪ UNITY-MD ❫❫ | ® UNITY TEAM</i>`;
-                    tgNotify(_tgStartMsg).catch(() => {});
-                  }
-
-                  // Lang select (first time only)
-                  await new Promise(r => setTimeout(r, 3000));
-                  const { sendButtons } = require('./commands/helper');
-                  await sendButtons(sock, botJid, {
-                    text:
-                      `╔══════════════════════════╗\n` +
-                      `║  🌐  *LANGUAGE SELECT*  🌐  ║\n` +
-                      `╚══════════════════════════╝\n\n` +
-                      `🌍 Select your bot language:\n` +
-                      `භාෂාව තෝරන්න:\n` +
-                      `மொழியை தேர்ந்தெடுக்கவும்:\n\n` +
-                      `⚠️ *All commands are blocked until you select a language!*\n\n` +
-                      `◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢\n` +
-                      `❪❪ UNITY-MD ❫❫ | ® UNITY TEAM`,
-                    footer: `❪❪ UNITY-MD ❫❫ | ® UNITY TEAM`,
-                    buttons: [
-                      { label: '🇬🇧 English', id: '.__setlang en' },
-                      { label: '🇱🇰 සිංහල',  id: '.__setlang si' },
-                      { label: '🇱🇰 தமிழ்',   id: '.__setlang ta' },
-                    ],
-                  });
-                  logger.info(`[SESSION] Language select sent to ${userId}`);
+              // ── STEP 3: Send startup message → group, retry, fallback ─
+              if (groupJid) {
+                // Try 1: send to group
+                let sent = false;
+                try {
+                  await sock.sendMessage(groupJid, { text: startupMsg });
+                  sent = true;
+                  logger.info(`[SESSION] Startup message sent to group`);
+                } catch (e) {
+                  logger.warn(`[SESSION] Startup to group failed: ${e.message}. Retrying...`);
                 }
-              } catch (e) {
-                logger.warn(`[SESSION] Startup/restart message failed: ${e.message}`);
+
+                // Retry after 5s if failed
+                if (!sent) {
+                  await new Promise(r => setTimeout(r, 5000));
+                  try {
+                    await sock.sendMessage(groupJid, { text: startupMsg });
+                    sent = true;
+                    logger.info(`[SESSION] Startup message sent to group (retry)`);
+                  } catch (e) {
+                    logger.warn(`[SESSION] Retry failed: ${e.message}. Falling back to bot number...`);
+                  }
+                }
+
+                // Fallback: send to bot's own number
+                if (!sent) {
+                  try {
+                    await sock.sendMessage(botJid, { text: startupMsg });
+                    logger.info(`[SESSION] Startup message sent to bot number (fallback)`);
+                  } catch (e) {
+                    logger.error(`[SESSION] All startup attempts failed: ${e.message}`);
+                  }
+                }
+              } else {
+                // No group configured — send to bot number
+                try {
+                  await sock.sendMessage(botJid, { text: startupMsg });
+                  logger.info(`[SESSION] Startup message sent to bot number (no group)`);
+                } catch (e) {
+                  logger.error(`[SESSION] Startup to bot number failed: ${e.message}`);
+                }
               }
             }, 5000);
           }
@@ -761,17 +443,15 @@ async function startSession(userId, onUpdate) {
         for (const msg of messages) {
           if (!msg.message) continue;
 
-          // ── Deduplication ────────────────────────────────
+          // ── Deduplication ──────────────────────────────────
           const msgId = msg.key?.id;
           if (msgId) {
             if (_smProcessedIds.has(msgId)) continue;
             _smProcessedIds.add(msgId);
-            if (_smProcessedIds.size > 2000) {
-              _smProcessedIds.delete(_smProcessedIds.values().next().value);
-            }
+            if (_smProcessedIds.size > 2000) _smProcessedIds.delete(_smProcessedIds.values().next().value);
           }
 
-          // ── Stale message filter (60s) ───────────────────
+          // ── Stale message filter (60s) ─────────────────────
           const msgAge = Math.floor(Date.now() / 1000) - (Number(msg.messageTimestamp) || 0);
           if (msgAge > 60) continue;
 
@@ -782,90 +462,14 @@ async function startSession(userId, onUpdate) {
               session.msgStore.delete(firstKey);
             }
           }
-
-          // ── Antidelete: catch "delete for everyone" (protocolMessage REVOKE) ──
-          const proto = msg.message?.protocolMessage;
-          if (proto?.type === 0 && proto?.key) {
-            try {
-              const fs = require('fs');
-              const path = require('path');
-              const dataDir = path.join(process.cwd(), 'data');
-              const sid = sock.sessionOwner || 'default';
-              const stateFile = path.join(dataDir, `${sid}_antidelete.json`);
-              const fallbackFile = path.join(dataDir, 'antidelete.json');
-              let state = { enabled: false };
-              try {
-                const sf = fs.existsSync(stateFile) ? stateFile : fallbackFile;
-                if (fs.existsSync(sf)) state = JSON.parse(fs.readFileSync(sf, 'utf8'));
-              } catch {}
-
-              if (state.enabled) {
-                const deletedKey  = proto.key;
-                const deleterJid  = msg.key.participant || msg.key.remoteJid || '';
-                const chatJid     = msg.key.remoteJid || '';
-                const storedMsg   = session.msgStore.get(deletedKey.id);
-                const botJid      = sock.user?.id?.replace(/:\d+@/, '@') || '';
-
-                if (botJid) {
-                  const deleterNum = deleterJid.split('@')[0];
-                  const chatLabel  = chatJid.endsWith('@g.us') ? `Group: ${chatJid}` : `DM: +${chatJid.split('@')[0]}`;
-
-                  let notifyText =
-                    `🗑️ *Antidelete Alert*\n` +
-                    `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                    `👤 *Deleted by:* +${deleterNum}\n` +
-                    `📍 *Chat:* ${chatLabel}\n` +
-                    `🕐 *Time:* ${new Date().toLocaleString('en-LK', { timeZone: 'Asia/Colombo' })}\n` +
-                    `━━━━━━━━━━━━━━━━━━━━━━\n`;
-
-                  if (storedMsg) {
-                    // Forward the original deleted message content
-                    const textContent =
-                      storedMsg.conversation ||
-                      storedMsg.extendedTextMessage?.text ||
-                      storedMsg.imageMessage?.caption ||
-                      storedMsg.videoMessage?.caption ||
-                      '';
-
-                    if (textContent) notifyText += `💬 *Message:* ${textContent}\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-
-                    await sock.sendMessage(botJid, { text: notifyText }).catch(() => {});
-
-                    // Try forwarding media if present
-                    const mediaTypes = ['imageMessage','videoMessage','audioMessage','stickerMessage','documentMessage'];
-                    for (const mtype of mediaTypes) {
-                      if (storedMsg[mtype]) {
-                        try {
-                          await sock.sendMessage(botJid, {
-                            forward: { key: deletedKey, message: storedMsg },
-                          }).catch(() => {});
-                        } catch {}
-                        break;
-                      }
-                    }
-                  } else {
-                    notifyText += `⚠️ _Message content not cached_\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-                    await sock.sendMessage(botJid, { text: notifyText }).catch(() => {});
-                  }
-                }
-              }
-            } catch {}
-            continue; // don't pass protocol messages to handleMessage
-          }
-
           if (msg.key.remoteJid === 'status@broadcast') {
             await handleStatus(sock, msg).catch(() => {});
             continue;
           }
-          // ── autoBehaviors: skip bot's own outgoing messages ──
-          if (!msg.key?.fromMe) {
-            await autoBehaviors(sock, msg).catch(() => {});
-          }
+          await autoBehaviors(sock, msg).catch(() => {});
           await handleMessage(sock, msg).catch(() => {});
         }
       });
-
-
 
       sock.ev.on('group-participants.update', async (update) => {
         await handleGroupJoin(sock, update).catch(() => {});
@@ -891,7 +495,7 @@ async function startSession(userId, onUpdate) {
 async function stopSession(userId) {
   const session = sessions.get(userId);
   if (!session) return;
-  // Flag tells the disconnect handler NOT to clear auth — this is intentional
+  // Flag tells disconnect handler to preserve auth
   session._manualStop = true;
   try {
     session.sock?.end?.();
