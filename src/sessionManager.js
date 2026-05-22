@@ -202,20 +202,15 @@ async function startSession(userId, onUpdate) {
         version,
         logger: silentLogger,
         msgRetryCounterCache: session.retryCache,
-
-        // ── KEY FIX: false prevents Signal prekey storm on connect ──
-        // true causes bot to negotiate Signal sessions for EVERY chat at once
-        // → "Closing open session in favor of incoming prekey bundle" flood
         syncFullHistory:       false,
-
-        maxMsgRetryCount:      2,           // fewer retries = less prekey churn
-        connectTimeoutMs:      60000,        // longer timeout = stable connect
-        keepAliveIntervalMs:   20000,        // more frequent keepalive
-        retryRequestDelayMs:   500,          // slightly slower retry = less flood
+        maxMsgRetryCount:      3,
+        connectTimeoutMs:      30000,
+        keepAliveIntervalMs:   25000,
+        retryRequestDelayMs:   250,
         generateHighQualityLinkPreview: false,
         markOnlineOnConnect:   false,
         printQRInTerminal:     false,
-        fireInitQueries:       true,
+        fireInitQueries:       false,
         emitOwnEvents:         false,
 
         auth: {
@@ -223,15 +218,9 @@ async function startSession(userId, onUpdate) {
           keys:  makeCacheableSignalKeyStore(state.keys, silentLogger),
         },
 
-        // ── KEY FIX: return undefined (not empty proto) for unknown msgs ──
-        // Returning empty proto tells Baileys the message exists → no retry
-        // Returning undefined tells Baileys to request retry from sender (correct)
-        getMessage: async (key) => {
-          const stored = session.msgStore.get(key.id);
-          return stored || undefined;
-        },
+        getMessage: async (key) => session.msgStore.get(key.id) || proto.Message.fromObject({}),
 
-        browser: ['Ubuntu', 'Chrome', '130.0.0'],
+        browser: ['Ubuntu', 'Chrome', '20.0.04'],
       });
 
       session.sock = sock;
