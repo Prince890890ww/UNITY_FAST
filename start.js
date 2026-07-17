@@ -2,7 +2,7 @@
 require('dotenv').config({ path: './config.env' });
 const {
   default: makeWASocket,
-  useMultiFileAuthState,   // <-- Iska use karenge memory mode mein
+  useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
@@ -89,10 +89,8 @@ async function connectToWhatsApp() {
     let state, saveCreds, _autoOnline;
     const isMemoryMode = process.env.SKIP_DATABASE === 'true';
 
-    // 🔥 MAIN FIX: Agar SKIP_DATABASE=true hai toh MongoDB skip karo
     if (isMemoryMode) {
       console.log(chalk.yellow('[DB] ⚠️ Memory Mode — Sessions will NOT persist across restarts!'));
-      // Local file-based auth (Railway pe temporary folder mein save hoga)
       const fileAuth = await useMultiFileAuthState('./auth_info_baileys');
       state = fileAuth.state;
       saveCreds = fileAuth.saveCreds;
@@ -506,14 +504,11 @@ async function connectToWhatsApp() {
       }
     });
 
-
-
     sock.ev.on('group-participants.update', async (update) => {
       await handleGroupJoin(sock, update);
       await handleGroupLeave(sock, update);
     });
 
-    // 🔥 FIX: Memory mode mein DB call skip karo
     sock.ev.on('groups.update', async (updates) => {
       if (isMemoryMode) return;
       for (const u of updates) {
@@ -525,7 +520,6 @@ async function connectToWhatsApp() {
       }
     });
 
-    // 🔥 FIX: Memory mode mein Anti-Delete skip karo (DB required)
     sock.ev.on('messages.update', async (updates) => {
       if (isMemoryMode) return;
       for (const { key, update } of updates) {
