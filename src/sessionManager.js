@@ -1,4 +1,7 @@
-// src/sessionManager.js — HAR USER KA ALAG FOLDER, EXPLICIT PAIRING
+// src/sessionManager.js — 100% MEMORY MODE (NO MONGODB)
+// HAR USER KA ALAG FOLDER — UNLIMITED SESSIONS
+'use strict';
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -34,9 +37,19 @@ async function startSession(userId, onUpdate) {
     }
   }
 
-  // 🔥 HAR USER KA ALAG FOLDER
+  // 🔥 HAR USER KA ALAG FOLDER (MongoDB ki jagah)
   const authFolder = path.join(__dirname, '..', 'auth_info_baileys_' + userId);
   fs.ensureDirSync(authFolder);
+
+  // Check if already registered (creds exist)
+  let credsExist = false;
+  try {
+    const credsFile = path.join(authFolder, 'creds.json');
+    if (fs.existsSync(credsFile)) {
+      const creds = fs.readJSONSync(credsFile);
+      if (creds?.registered || creds?.me?.id) credsExist = true;
+    }
+  } catch {}
 
   const { state, saveCreds } = await useMultiFileAuthState(authFolder);
   const { version } = await fetchLatestBaileysVersion();
@@ -50,6 +63,7 @@ async function startSession(userId, onUpdate) {
     connectedAt: null,
     msgStore: new Map(),
     retryCache: new NodeCache(),
+    pairingResolved: credsExist, // agar creds exist karte hain toh pairing skip
   };
   sessions.set(userId, session);
 
@@ -75,57 +89,62 @@ async function startSession(userId, onUpdate) {
   session.sock = sock;
 
   // ── ✅ EXPLICIT PAIRING CODE GENERATION ───────────────────
-  // Socket banne ke 2 second baad seedha code generate karo
-  setTimeout(async () => {
-    // Agar already registered hai toh kuch mat karo
-    if (sock.authState.creds.registered) {
-      session.status = STATUS.CONNECTED;
-      if (onUpdate) onUpdate(userId, { status: STATUS.CONNECTED });
-      return;
-    }
-    // Agar code already set hai toh skip
-    if (session.pairCode) return;
+  // Socket banne ke 3 second baad seedha code generate karo (agar already registered nahi)
+  if (!credsExist) {
+    setTimeout(async () => {
+      // Agar already registered hai toh skip
+      if (sock.authState.creds.registered || session.pairCode) return;
+      if (session.pairingResolved) return;
 
-    try {
-      session.status = STATUS.PAIRING;
-      if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING });
+      try {
+        session.status = STATUS.PAIRING;
+        session.pairingResolved = true;
+        if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING });
 
-      const cleanNum = userId.replace(/[^0-9]/g, '');
-      const code = await sock.requestPairingCode(cleanNum);
-      session.pairCode = code?.match(/.{1,4}/g)?.join('-') || code;
-      console.log(`[SESSION] 🔑 ${userId} PAIR CODE: ${session.pairCode}`);
-      if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING, pairCode: session.pairCode });
-    } catch (e) {
-      console.error(`[SESSION] ❌ Pairing failed for ${userId}:`, e.message);
-      session.status = STATUS.ERROR;
-      if (onUpdate) onUpdate(userId, { status: STATUS.ERROR, error: e.message });
-    }
-  }, 2000);
+        const cleanNum = userId.replace(/[^0-9]/g, '');
+        console.log(`[SESSION] ⏳ Generating pairing code for ${cleanNum}...`);
+        const code = await sock.requestPairingCode(cleanNum);
+        session.pairCode = code?.match(/.{1,4}/g)?.join('-') || code;
+        console.log(`[SESSION] 🔑 ${userId} PAIR CODE: ${session.pairCode}`);
+        if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING, pairCode: session.pairCode });
+      } catch (e) {
+        console.error(`[SESSION] ❌ Pairing failed for ${userId}:`, e.message);
+        session.status = STATUS.ERROR;
+        session.pairingResolved = false; // allow retry
+        if (onUpdate) onUpdate(userId, { status: STATUS.ERROR, error: e.message });
+      }
+    }, 3000);
+  } else {
+    // Creds exist — directly connected
+    console.log(`[SESSION] ℹ️ ${userId} has existing creds — waiting for connection...`);
+  }
 
   // ── Connection Events ──────────────────────────────────────
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-    // Agar QR aata hai ya connecting hai toh retry
-    if ((connection === 'connecting' || !!qr) && !sock.authState.creds.registered && !session.pairCode) {
-      // Agar timeout se code generate nahi hua toh wapas try karo
-      setTimeout(async () => {
-        if (session.pairCode || sock.authState.creds.registered) return;
-        try {
-          const cleanNum = userId.replace(/[^0-9]/g, '');
-          const code = await sock.requestPairingCode(cleanNum);
-          session.pairCode = code?.match(/.{1,4}/g)?.join('-') || code;
-          console.log(`[SESSION] 🔑 ${userId} PAIR CODE (retry): ${session.pairCode}`);
-          if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING, pairCode: session.pairCode });
-        } catch (e) {
-          console.error(`[SESSION] Retry failed for ${userId}:`, e.message);
-        }
-      }, 5000);
+    // Agar QR aata hai ya connecting hai toh retry (agar code nahi bana)
+    if ((connection === 'connecting' || !!qr) && !sock.authState.creds.registered && !session.pairCode && !session.pairingResolved) {
+      session.pairingResolved = true;
+      session.status = STATUS.PAIRING;
+      if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING });
+
+      try {
+        const cleanNum = userId.replace(/[^0-9]/g, '');
+        const code = await sock.requestPairingCode(cleanNum);
+        session.pairCode = code?.match(/.{1,4}/g)?.join('-') || code;
+        console.log(`[SESSION] 🔑 ${userId} PAIR CODE (retry): ${session.pairCode}`);
+        if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING, pairCode: session.pairCode });
+      } catch (e) {
+        console.error(`[SESSION] ❌ Retry pairing failed for ${userId}:`, e.message);
+        session.pairingResolved = false;
+      }
     }
 
     if (connection === 'open') {
       session.status = STATUS.CONNECTED;
       session.connectedAt = new Date();
       session.pairCode = null;
-      console.log(`[SESSION] ✅ ${userId} connected`);
+      session.pairingResolved = true;
+      console.log(`[SESSION] ✅ ${userId} connected successfully`);
       if (onUpdate) onUpdate(userId, { status: STATUS.CONNECTED });
     }
 
@@ -137,9 +156,11 @@ async function startSession(userId, onUpdate) {
       if (reason === DisconnectReason.loggedOut || reason === DisconnectReason.badSession) {
         sessions.delete(userId);
         fs.removeSync(authFolder);
+        if (onUpdate) onUpdate(userId, { status: STATUS.DISCONNECTED, reason: 'logged_out' });
         return;
       }
 
+      // Warna reconnect (unlimited retries)
       setTimeout(() => {
         console.log(`[SESSION] 🔄 Reconnecting ${userId}...`);
         startSession(userId, onUpdate);
@@ -175,7 +196,12 @@ function getSession(userId) {
 function getAllSessions() {
   const result = [];
   for (const [userId, s] of sessions) {
-    result.push({ userId, status: s.status, connectedAt: s.connectedAt, pairCode: s.pairCode });
+    result.push({
+      userId,
+      status: s.status,
+      connectedAt: s.connectedAt,
+      pairCode: s.pairCode || null,
+    });
   }
   return result;
 }
