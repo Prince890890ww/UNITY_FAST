@@ -351,7 +351,7 @@ async function start() {
     }
   });
 
-  logger.info('[TG-PAIR] Pair bot started ✅');
+  logger.info('[TG-PAIR] Pair bot started ✅ (Public mode – all users can pair)');
 }
 
 module.exports = { start };
