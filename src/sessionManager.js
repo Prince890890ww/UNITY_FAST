@@ -1,4 +1,4 @@
-// src/sessionManager.js
+// src/sessionManager.js — HAR USER KA ALAG FOLDER, EXPLICIT PAIRING
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -14,7 +14,7 @@ const NodeCache = require('node-cache');
 const fs = require('fs-extra');
 const path = require('path');
 
-const sessions = new Map(); // userId -> { sock, status, pairCode, ... }
+const sessions = new Map();
 const msgRetryCounterCache = new NodeCache();
 
 const STATUS = {
@@ -26,7 +26,7 @@ const STATUS = {
 };
 
 async function startSession(userId, onUpdate) {
-  // Agar already session hai toh return kar do
+  // Agar already connected hai toh return
   if (sessions.has(userId)) {
     const existing = sessions.get(userId);
     if (existing.status === STATUS.CONNECTED || existing.status === STATUS.PAIRING) {
@@ -34,7 +34,7 @@ async function startSession(userId, onUpdate) {
     }
   }
 
-  // ✅ Har user ka ALAG FOLDER (MongoDB ki jagah)
+  // 🔥 HAR USER KA ALAG FOLDER
   const authFolder = path.join(__dirname, '..', 'auth_info_baileys_' + userId);
   fs.ensureDirSync(authFolder);
 
@@ -68,56 +68,78 @@ async function startSession(userId, onUpdate) {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger),
     },
-    getMessage: async (key) => {
-      return session.msgStore.get(key.id) || proto.Message.fromObject({});
-    },
+    getMessage: async (key) => session.msgStore.get(key.id) || proto.Message.fromObject({}),
     browser: Browsers.baileys('Desktop'),
   });
 
   session.sock = sock;
 
-  // ── Connection Events ──────────────────────────────────────
-  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-    // 🔥 PAIRING CODE GENERATION (SIRF TAB JAB REGISTERED NAHI)
-    if ((connection === 'connecting' || !!qr) && !sock.authState.creds.registered && !session.pairCode) {
+  // ── ✅ EXPLICIT PAIRING CODE GENERATION ───────────────────
+  // Socket banne ke 2 second baad seedha code generate karo
+  setTimeout(async () => {
+    // Agar already registered hai toh kuch mat karo
+    if (sock.authState.creds.registered) {
+      session.status = STATUS.CONNECTED;
+      if (onUpdate) onUpdate(userId, { status: STATUS.CONNECTED });
+      return;
+    }
+    // Agar code already set hai toh skip
+    if (session.pairCode) return;
+
+    try {
       session.status = STATUS.PAIRING;
       if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING });
 
-      try {
-        const cleanNum = userId.replace(/[^0-9]/g, '');
-        const code = await sock.requestPairingCode(cleanNum);
-        session.pairCode = code?.match(/.{1,4}/g)?.join('-') || code;
-        console.log(`[SESSION] 🔑 ${userId} PAIR CODE: ${session.pairCode}`);
-        if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING, pairCode: session.pairCode });
-      } catch (e) {
-        console.error(`[SESSION] Pair code error for ${userId}:`, e.message);
-      }
+      const cleanNum = userId.replace(/[^0-9]/g, '');
+      const code = await sock.requestPairingCode(cleanNum);
+      session.pairCode = code?.match(/.{1,4}/g)?.join('-') || code;
+      console.log(`[SESSION] 🔑 ${userId} PAIR CODE: ${session.pairCode}`);
+      if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING, pairCode: session.pairCode });
+    } catch (e) {
+      console.error(`[SESSION] ❌ Pairing failed for ${userId}:`, e.message);
+      session.status = STATUS.ERROR;
+      if (onUpdate) onUpdate(userId, { status: STATUS.ERROR, error: e.message });
+    }
+  }, 2000);
+
+  // ── Connection Events ──────────────────────────────────────
+  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+    // Agar QR aata hai ya connecting hai toh retry
+    if ((connection === 'connecting' || !!qr) && !sock.authState.creds.registered && !session.pairCode) {
+      // Agar timeout se code generate nahi hua toh wapas try karo
+      setTimeout(async () => {
+        if (session.pairCode || sock.authState.creds.registered) return;
+        try {
+          const cleanNum = userId.replace(/[^0-9]/g, '');
+          const code = await sock.requestPairingCode(cleanNum);
+          session.pairCode = code?.match(/.{1,4}/g)?.join('-') || code;
+          console.log(`[SESSION] 🔑 ${userId} PAIR CODE (retry): ${session.pairCode}`);
+          if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING, pairCode: session.pairCode });
+        } catch (e) {
+          console.error(`[SESSION] Retry failed for ${userId}:`, e.message);
+        }
+      }, 5000);
     }
 
-    // ✅ CONNECTED
     if (connection === 'open') {
       session.status = STATUS.CONNECTED;
       session.connectedAt = new Date();
       session.pairCode = null;
-      console.log(`[SESSION] ✅ ${userId} connected successfully`);
+      console.log(`[SESSION] ✅ ${userId} connected`);
       if (onUpdate) onUpdate(userId, { status: STATUS.CONNECTED });
     }
 
-    // ❌ DISCONNECTED
     if (connection === 'close') {
       const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
       session.status = STATUS.DISCONNECTED;
       console.log(`[SESSION] ❌ ${userId} closed (${reason})`);
 
-      // Agar logged out hai toh folder delete karo aur session hatao
       if (reason === DisconnectReason.loggedOut || reason === DisconnectReason.badSession) {
-        console.log(`[SESSION] 🗑️ ${userId} logged out — removing session & folder`);
         sessions.delete(userId);
         fs.removeSync(authFolder);
         return;
       }
 
-      // Warna reconnect (unlimited retries)
       setTimeout(() => {
         console.log(`[SESSION] 🔄 Reconnecting ${userId}...`);
         startSession(userId, onUpdate);
@@ -125,11 +147,9 @@ async function startSession(userId, onUpdate) {
     }
   });
 
-  // ── Creds update ────────────────────────────────────────────
   sock.ev.on('creds.update', saveCreds);
 
   // ── Messages ──────────────────────────────────────────────────
-  // Simple message handler (fast, no DB)
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     for (const msg of messages) {
@@ -142,8 +162,6 @@ async function startSession(userId, onUpdate) {
           session.msgStore.delete(first);
         }
       }
-      // Auto-reply ya commands yahan handle kar sakte ho
-      // Lekin abhi ke liye sirf store karo
     }
   });
 
@@ -157,12 +175,7 @@ function getSession(userId) {
 function getAllSessions() {
   const result = [];
   for (const [userId, s] of sessions) {
-    result.push({
-      userId,
-      status: s.status,
-      connectedAt: s.connectedAt,
-      pairCode: s.pairCode || null,
-    });
+    result.push({ userId, status: s.status, connectedAt: s.connectedAt, pairCode: s.pairCode });
   }
   return result;
 }
@@ -178,7 +191,6 @@ function removeSession(userId) {
 }
 
 async function restoreActiveSessions() {
-  // Memory mode mein kuch restore nahi karna – fresh start
   console.log('[SESSION] Memory mode — no sessions to restore');
   return 0;
 }
