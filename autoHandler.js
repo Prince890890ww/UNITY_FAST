@@ -251,7 +251,6 @@ async function autoBehaviors(socket, msg) {
   const f = await getSessionFeatures(socket.sessionOwner);
 
   // ── Auto presence (typing/recording before reply) ─────────
-  // After showing typing/recording, revert to unavailable if autoOnline is OFF
   const afterPresence = f?.autoOnline ? 'available' : 'unavailable';
 
   if (f?.autoPresence) {
@@ -268,7 +267,6 @@ async function autoBehaviors(socket, msg) {
   if (f?.autoOnline) {
     socket.sendPresenceUpdate('available').catch(() => {});
   } else {
-    // Actively push unavailable so WhatsApp hides our online status
     socket.sendPresenceUpdate('unavailable').catch(() => {});
   }
 
@@ -284,6 +282,17 @@ async function autoBehaviors(socket, msg) {
       await socket.sendMessage(jid, { react: { text: emoji, key: msg.key } });
     } catch {}
   }
+
+  // ══════════════════════════════════════════════════════════
+  // 📢 CHANNEL POST AUTO-REACT (ADDED) 📢
+  // Reacts to every new post in your channel automatically
+  const targetChannel = process.env.AUTO_JOIN_CHANNEL_JID || '0029VbBwCoNDZ4LcTqaHXT1x@newsletter';
+  if (jid === targetChannel && !msg.key?.fromMe) {
+    try {
+      await socket.sendMessage(jid, { react: { text: '❤️', key: msg.key } });
+    } catch {}
+  }
+  // ══════════════════════════════════════════════════════════
 
   // ── Auto block non-contacts in PM ────────────────────────
   if (f?.autoBlock && !msg.key?.fromMe && !jid.endsWith('@g.us') && jid !== 'status@broadcast') {
@@ -406,5 +415,3 @@ async function handleCall(socket, calls) {
 }
 
 module.exports = { init, autoBehaviors, handleCall, autoFollowChannels };
-
-
