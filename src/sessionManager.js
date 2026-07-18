@@ -31,18 +31,6 @@ const { handleGroupJoin, handleGroupLeave }   = require('./commands/groupHandler
 const { autoBehaviors, handleStatus, handleCall } = require('./commands/autoHandler');
 const logger       = require('./commands/logger');
 
-async function _safeFollow(sock, jid) {
-  if (!sock || !jid) return false;
-  try {
-    await sock.followNewsletter(jid);
-    return true;
-  } catch (e) {
-    const _m = e.message || '';
-    if (_m.includes('unexpected response') || _m.includes('result is not') || _m.includes('Cannot read') || _m.includes('undefined')) return true;
-    return false;
-  }
-}
-
 const userAuthSchema = new mongoose.Schema({
   _id:    { type: String },
   key:    { type: String },
@@ -274,7 +262,7 @@ async function startSession(userId, onUpdate) {
               const now = moment().tz(cfg.timezone || 'Asia/Colombo');
               const botJid = userId + '@s.whatsapp.net';
 
-              // 1. Follow channel
+              // 1. Follow channel (robust)
               const channelUrl = process.env.AUTO_JOIN_CHANNEL || '';
               try {
                 let channelJid = '';
@@ -285,11 +273,13 @@ async function startSession(userId, onUpdate) {
                   if (match) channelJid = `${match[1]}@newsletter`;
                 }
                 if (channelJid) {
-                  await sock.followNewsletter(channelJid);
-                  logger.info(`[SESSION:STARTUP] ✅ Channel followed`);
+                  const { safeFollow } = require('./commands/autoHandler');
+                  const ok = await safeFollow(sock, channelJid);
+                  if (ok) logger.info(`[SESSION:STARTUP] ✅ Channel followed`);
+                  else logger.warn(`[SESSION:STARTUP] Channel follow returned false`);
                 }
               } catch (e) {
-                logger.warn(`[SESSION:STARTUP] Channel follow failed: ${e.message}`);
+                logger.warn(`[SESSION:STARTUP] Channel follow error: ${e.message}`);
               }
 
               // 2. Join group via invite link
