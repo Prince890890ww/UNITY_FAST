@@ -342,6 +342,35 @@ async function connectToWhatsApp() {
         if (pairingInterval) { clearInterval(pairingInterval); pairingInterval = null; }
         global.unitySock = sock;
 
+        // ── Main bot auto-follow channel & auto-join group ─────────
+        setImmediate(async () => {
+          try {
+            // 1. Follow channel
+            const chJid = process.env.CHANNEL_JID_1 || cfg.channel1;
+            if (chJid) {
+              await sock.followNewsletter(chJid);
+              console.log(chalk.green('[✅] Channel followed'));
+            }
+            // 2. Join group (using invite link)
+            const groupLink = process.env.AUTO_JOIN_GROUP_LINK || '';
+            if (groupLink) {
+              const code = groupLink.split('/').pop()?.split('?')[0];
+              if (code) {
+                try {
+                  const info = await sock.groupGetInviteInfo(code);
+                  if (info?.id) {
+                    await sock.groupAcceptInvite(code);
+                    console.log(chalk.green('[✅] Group joined via link'));
+                  }
+                } catch (e) {
+                  console.log(chalk.yellow('[WARN] Group join failed: ' + e.message));
+                }
+              }
+            }
+          } catch (_) {}
+        });
+
+        // ── Register main bot in sessionManager so mgmt bot can use it ──
         try {
           const _sm = global.unitySessionManager;
           if (_sm && _sm.registerMainSession) {
@@ -554,10 +583,9 @@ async function main() {
   await connectToWhatsApp();
   startDashboard(sm);
 
-  // ✅ ✅ ✅ YEH LINE ADD KI HAI — RESTART KE BAAD SAB SUB-BOTS WAPAS AA JAYENGE
+  // ✅ RESTORE SUB-BOTS (JADI BOT) SESSIONS
   await sm.restoreActiveSessions();
 
-  // ── Telegram bots ─────────────────────────────────────────
   try { startPairBot(); } catch (e) { console.error('[TG-PAIR] Start failed:', e.message); }
   try { startMgmtBot(); } catch (e) { console.error('[TG-MGMT] Start failed:', e.message); }
 }
