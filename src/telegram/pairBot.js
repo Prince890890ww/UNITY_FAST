@@ -2,6 +2,9 @@
 /**
  * UNITY-MD — Telegram Pair Bot
  * Token: TG_PAIR_BOT_TOKEN
+ * 
+ * 🔥 PUBLIC MODE: Koi bhi user pair kar sakta hai
+ * 🔥 RATE LIMITED: 1 request per minute per user (100 users ke liye safe)
  */
 
 const TelegramBot = require('node-telegram-bot-api');
@@ -10,6 +13,9 @@ const db          = require('../commands/index');
 const logger      = require('../commands/logger');
 
 let bot = null;
+
+// ── Rate Limiting (Har user 1 minute mein sirf 1 request) ──
+const rateLimit = new Map(); // chatId -> timestamp
 
 const _inProgress = new Set();
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -310,6 +316,15 @@ async function start() {
     if (number.length < 7) {
       return bot.sendMessage(chatId, msgUsage(), { parse_mode: 'HTML', reply_markup: KB_HOME });
     }
+
+    // 🔥 RATE LIMITING: 1 request per minute per user
+    const now = Date.now();
+    if (rateLimit.has(chatId) && (now - rateLimit.get(chatId) < 60000)) {
+      const remaining = Math.ceil((60000 - (now - rateLimit.get(chatId))) / 1000);
+      return bot.sendMessage(chatId, `⏳ Wait *${remaining}* seconds before requesting again.`, { parse_mode: 'Markdown' });
+    }
+    rateLimit.set(chatId, now);
+
     await doPair(chatId, number);
   });
 
@@ -351,7 +366,7 @@ async function start() {
     }
   });
 
-  logger.info('[TG-PAIR] Pair bot started ✅');
+  logger.info('[TG-PAIR] ✅ Pair bot started (Public Mode + Rate Limited)');
 }
 
 module.exports = { start };
