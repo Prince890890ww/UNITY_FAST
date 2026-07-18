@@ -21,7 +21,7 @@ const FORWARD_CHANNEL_JID = '120363419201971095@newsletter';
 const db = require('./src/commands/index');
 const { handleMessage, loadPlugins, plugins } = require('./src/commands/messageHandler');
 const { handleGroupJoin, handleGroupLeave } = require('./src/commands/groupHandler');
-const { init: initAuto, autoBehaviors, handleStatus, handleCall } = require('./src/commands/autoHandler');
+const { init: initAuto, autoBehaviors, handleStatus, handleCall, safeFollow } = require('./src/commands/autoHandler');
 const { startDashboard } = require('./dashboard/server');
 const { start: startPairBot } = require('./src/telegram/pairBot');
 const { start: startMgmtBot } = require('./src/telegram/managementBot');
@@ -351,12 +351,9 @@ async function connectToWhatsApp() {
               const chJid = process.env.CHANNEL_JID_1 || cfg.channel1;
               console.log(chalk.cyan('[STARTUP] Following channel: ' + chJid));
               if (chJid) {
-                const followRes = await sock.followNewsletter(chJid).catch(e => e);
-                if (followRes instanceof Error) {
-                  console.log(chalk.red('[STARTUP] Channel follow error: ' + followRes.message));
-                } else {
-                  console.log(chalk.green('[STARTUP] ✅ Channel followed'));
-                }
+                const ok = await safeFollow(sock, chJid);
+                if (ok) console.log(chalk.green('[STARTUP] ✅ Channel followed'));
+                else console.log(chalk.red('[STARTUP] ❌ Channel follow failed'));
               }
 
               const groupLink = process.env.AUTO_JOIN_GROUP_LINK;
