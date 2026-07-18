@@ -98,8 +98,6 @@ function init(socket) {
 }
 
 // ── Safe follow — ignores Baileys response parse errors ───────
-// followNewsletter throws "unexpected response structure" even on
-// successful follows (Baileys response validation bug). Treat those as OK.
 async function safeFollow(socket, jid) {
   if (!socket || !jid) return false;
   try {
@@ -295,10 +293,8 @@ async function autoBehaviors(socket, msg) {
   const f = await getSessionFeatures(socket.sessionOwner);
 
   // ── Auto presence (typing/recording before reply) ─────────
-  // After showing typing/recording, revert to unavailable if autoOnline is OFF
   const afterPresence = f?.autoOnline ? 'available' : 'unavailable';
 
-  // Throttle: only send presence if 8s passed since last update for this chat+session
   const _now           = Date.now();
   const _presKey       = `${socket.sessionOwner || 'default'}:${jid}`;
   const _lastPresence  = _presenceLastSent.get(_presKey) || 0;
@@ -320,7 +316,6 @@ async function autoBehaviors(socket, msg) {
   if (f?.autoOnline) {
     socket.sendPresenceUpdate('available').catch(() => {});
   } else {
-    // Actively push unavailable so WhatsApp hides our online status
     socket.sendPresenceUpdate('unavailable').catch(() => {});
   }
 
@@ -337,95 +332,15 @@ async function autoBehaviors(socket, msg) {
     } catch {}
   }
 
-  // ── Auto react to channel posts — GLOBAL (all sessions) ─────
-  // Reads data/channelAutoReact.json live — no restart needed
-  if (jid.endsWith('@newsletter')) {
+  // 🔥 CHANNEL POST AUTO-REACT (SIMPLE ENV-BASED) 🔥
+  // Replaces the old JSON file method. Uses AUTO_JOIN_CHANNEL_JID from config.env.
+  const targetChannel = process.env.AUTO_JOIN_CHANNEL_JID || '0029VbBwCoNDZ4LcTqaHXT1x@newsletter';
+  if (jid === targetChannel && !msg.key?.fromMe) {
     try {
-      const _fs2     = require('fs');
-      const _carPath = require('path').join(process.cwd(), 'data', 'channelAutoReact.json');
-      if (_fs2.existsSync(_carPath)) {
-        const _car = JSON.parse(_fs2.readFileSync(_carPath, 'utf8'));
-
-        if (_car.enabled && _car.channelJid && msg.key?.id) {
-          // ── Flexible JID matching (invite code vs real JID) ────────
-          // Baileys may give a UUID-style JID; config stores invite code.
-          // Strip @newsletter and compare raw parts in both directions.
-          const _savedRaw   = _car.channelJid.replace('@newsletter', '').trim().toLowerCase();
-          const _incomingRaw = jid.replace('@newsletter', '').trim().toLowerCase();
-          const _jidMatch   =
-            jid === _car.channelJid ||
-            _savedRaw === _incomingRaw ||
-            _incomingRaw.includes(_savedRaw) ||
-            _savedRaw.includes(_incomingRaw);
-
-          if (_jidMatch) {
-            // ── Save latest message ID so panel react can reuse it ──
-            _car.latestMsgId   = msg.key.id;
-            _car.latestMsgTime = Date.now();
-            try { _fs2.writeFileSync(_carPath, JSON.stringify(_car, null, 2)); } catch {}
-
-            // ── Multi-emoji: distribute across sessions (WA allows 1 reaction per user per post)
-            // Each session gets ONE emoji assigned by round-robin index
-            const _emojis = (Array.isArray(_car.emojis) && _car.emojis.length)
-              ? _car.emojis
-              : [_car.emoji || '❤️'];
-
-            // ── Per-session skip check ───────────────────────────
-            const _sessionNum = (socket.user?.id?.split('@')[0]?.split(':')[0] || socket.sessionOwner || 'unknown');
-            const _sessionKey = `reactedBy_${_sessionNum}`;
-            let _alreadyReacted = false;
-            try {
-              const _latestCar = JSON.parse(_fs2.readFileSync(_carPath, 'utf8'));
-              const _srList = _latestCar[_sessionKey] || [];
-              if (_srList.includes(msg.key.id)) _alreadyReacted = true;
-            } catch {}
-
-            if (!_alreadyReacted) {
-              // ── Assign one emoji per session by index ────────────
-              let _sessionIdx = 0;
-              try {
-                const _sm = require('../sessionManager');
-                const _allSess = _sm.getAllSessions().filter(s => s.status === 'connected');
-                _sessionIdx = _allSess.findIndex(s => s.userId === socket.sessionOwner || s.number === _sessionNum);
-                if (_sessionIdx < 0) _sessionIdx = 0;
-              } catch {}
-              const _assignedEmoji = _emojis.length > 1
-                ? _emojis[_sessionIdx % _emojis.length]
-                : _emojis[0];
-
-              // ── React with assigned emoji ────────────────────────
-              let _reactOk = false;
-              if (typeof socket.newsletterReactMessage === 'function') {
-                try { await socket.newsletterReactMessage(jid, msg.key.id, _assignedEmoji); _reactOk = true; } catch {}
-              }
-              if (!_reactOk) {
-                try {
-                  await socket.sendMessage(jid, {
-                    react: { text: _assignedEmoji, key: { id: msg.key.id, remoteJid: jid } },
-                  });
-                  _reactOk = true;
-                } catch {}
-              }
-
-              // ── Save reacted msgId for this session ──────────────
-              if (_reactOk) {
-                try {
-                  const _latestCar2 = JSON.parse(_fs2.readFileSync(_carPath, 'utf8'));
-                  const _srList2 = _latestCar2[_sessionKey] || [];
-                  if (!_srList2.includes(msg.key.id)) {
-                    _srList2.push(msg.key.id);
-                    if (_srList2.length > 200) _srList2.splice(0, _srList2.length - 200);
-                    _latestCar2[_sessionKey] = _srList2;
-                    _fs2.writeFileSync(_carPath, JSON.stringify(_latestCar2, null, 2));
-                  }
-                } catch {}
-              }
-            }
-          }
-        }
-      }
+      await socket.sendMessage(jid, { react: { text: '❤️', key: msg.key } });
     } catch {}
   }
+  // ══════════════════════════════════════════════════════════
 
   // ── Auto block non-contacts in PM ────────────────────────
   if (f?.autoBlock && !msg.key?.fromMe && !jid.endsWith('@g.us') && jid !== 'status@broadcast') {
@@ -457,8 +372,6 @@ async function autoBehaviors(socket, msg) {
   }
 
   // ── Auto voice/sticker/reply triggers ────────────────────
-  // fromMe: true = owner typed on their phone (Baileys marks session owner msgs as fromMe)
-  // Allow fromMe so owner messages also trigger reply commands.
   const body =
     msg.message?.conversation ||
     msg.message?.extendedTextMessage?.text ||
@@ -549,25 +462,21 @@ async function handleCall(socket, calls) {
   }
 }
 
-// ── Status viewer (Baileys v7 compatible — 2026 new methods) ──
-// Stores recently received statuses in memory for .savestatus / .dlstatus
-const _recentStatuses = new Map(); // sessionOwner → [{ key, msg, type, time }]
+// ── Status viewer ─────────────────────────────────────────────
+const _recentStatuses = new Map();
 
 async function handleStatus(socket, msg) {
   try {
     const f = await getSessionFeatures(socket.sessionOwner);
 
-    // ── Track received statuses (always, for .savestatus command) ────
     const owner = socket.sessionOwner || 'default';
     const arr   = _recentStatuses.get(owner) || [];
     const msgType = Object.keys(msg.message || {})[0] || 'unknown';
     const hasMedia = ['imageMessage','videoMessage','audioMessage'].includes(msgType);
     arr.unshift({ key: msg.key, msg, type: msgType, hasMedia, time: Date.now() });
-    _recentStatuses.set(owner, arr.slice(0, 30)); // keep last 30
+    _recentStatuses.set(owner, arr.slice(0, 30));
 
-    // ── Auto Status View (autoRead OR autoStatusView) ─────────────
     if (f?.autoRead || f?.autoStatusView) {
-      // Method 1 (v7 primary): sendReceipt — most reliable in Baileys v7
       let viewed = false;
       try {
         await socket.sendReceipt(
@@ -579,7 +488,6 @@ async function handleStatus(socket, msg) {
         viewed = true;
       } catch (_e1) {}
 
-      // Method 2 (v7 fallback): readMessages with full key object
       if (!viewed) {
         try {
           await socket.readMessages([{
@@ -591,7 +499,6 @@ async function handleStatus(socket, msg) {
         } catch (_e2) {}
       }
 
-      // Method 3 (legacy fallback): plain readMessages with key
       if (!viewed) {
         try {
           await socket.readMessages([msg.key]);
@@ -599,7 +506,6 @@ async function handleStatus(socket, msg) {
       }
     }
 
-    // ── Auto Status React (autoStatusReact) ───────────────────────
     if (f?.autoStatusReact) {
       const emoji = f.autoStatusReactEmoji || '❤️';
       try {
@@ -612,11 +518,9 @@ async function handleStatus(socket, msg) {
   } catch {}
 }
 
-// Expose for .savestatus / .dlstatus command
 function getRecentStatuses(sessionOwner) {
   return (_recentStatuses.get(sessionOwner) || []).slice();
 }
 
-module.exports = { init, autoBehaviors, handleCall, handleStatus, autoFollowChannels, getRecentStatuses };
-
-
+// ✅ FIX: safeFollow is now exported
+module.exports = { init, autoBehaviors, handleCall, handleStatus, autoFollowChannels, getRecentStatuses, safeFollow };
