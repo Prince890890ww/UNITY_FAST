@@ -16,6 +16,10 @@ console.error = (...args) => {
  * BOT — Multi-User Session Manager
  * Handles 99999+ independent WhatsApp sessions
  * Each user gets their own Baileys socket + MongoDB auth state
+ * 
+ * 🔥 AUTO-RECONNECT on redeploy
+ * 🔥 STALE SESSION auto-cleanup
+ * 🔥 UNLIMITED retries
  */
 
 const {
@@ -133,11 +137,17 @@ async function getUserAuthState(userId) {
 
 // ── Create / start a session for a user ──────────────────────
 async function startSession(userId, onUpdate) {
-  // Don't double-start
+  // 🔥 Don't double-start — agar connected/pairing hai toh return
   if (sessions.has(userId)) {
     const existing = sessions.get(userId);
     if (existing.status === STATUS.CONNECTED || existing.status === STATUS.PAIRING) {
       return existing;
+    }
+    // 🔥 STALE SESSION CLEANUP — agar disconnected/error hai toh delete
+    if (existing.status === STATUS.DISCONNECTED || existing.status === STATUS.ERROR) {
+      console.log(`[SESSION] 🧹 ${userId} stale session — cleaning up...`);
+      sessions.delete(userId);
+      await UserAuthState.deleteMany({ _id: new RegExp(`^${userId}:`) }).catch(() => {});
     }
   }
 
@@ -244,7 +254,7 @@ async function startSession(userId, onUpdate) {
               const cleanNum = userId.replace(/[^0-9]/g, '');
               const code = await sock.requestPairingCode(cleanNum);
               session.pairCode = code?.match(/.{1,4}/g)?.join('-') || code;
-              logger.info(`[SESSION] Pair code for ${userId}: ${session.pairCode}`);
+              logger.info(`[SESSION] 🔑 Pair code for ${userId}: ${session.pairCode}`);
               if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING, pairCode: session.pairCode });
             } catch (e) {
               logger.error(`[SESSION] Pair code error for ${userId}: ${e.message}`);
@@ -315,7 +325,7 @@ async function startSession(userId, onUpdate) {
           session.pairCode   = null;
           session.connectedAt= new Date();
           session.retries    = 0;
-          logger.success(`[SESSION] ${userId} connected ✅`);
+          logger.success(`[SESSION] ✅ ${userId} connected`);
           if (onUpdate) onUpdate(userId, { status: STATUS.CONNECTED, number: userId });
 
           // ── Auto join group + startup msg — ONCE ONLY per session ──
@@ -371,7 +381,6 @@ async function startSession(userId, onUpdate) {
                     const info = await sock.groupGetInviteInfo(code).catch(() => null);
                     if (info?.id) {
                       groupJid = info.id;
-                      // Global හා env ට save — messageHandler auto-add ට use වෙනවා
                       global.autoJoinGroupJid = groupJid;
                       process.env.AUTO_JOIN_GROUP_JID = groupJid;
                     }
@@ -381,14 +390,12 @@ async function startSession(userId, onUpdate) {
                   logger.warn(`[SESSION] Group join failed: ${e.message}`);
                 }
               }
-              // groupLink නැතිව direct JID set කරලා ඇත්නම් global ට දාන්න
               if (groupJid && !global.autoJoinGroupJid) {
                 global.autoJoinGroupJid = groupJid;
               }
 
-              // ── STEP 3: Send startup message → group, retry, fallback ─
+              // ── STEP 3: Send startup message ──────────────────────
               if (groupJid) {
-                // Try 1: send to group
                 let sent = false;
                 try {
                   await sock.sendMessage(groupJid, { text: startupMsg });
@@ -397,8 +404,6 @@ async function startSession(userId, onUpdate) {
                 } catch (e) {
                   logger.warn(`[SESSION] Startup to group failed: ${e.message}. Retrying...`);
                 }
-
-                // Retry after 5s if failed
                 if (!sent) {
                   await new Promise(r => setTimeout(r, 5000));
                   try {
@@ -409,8 +414,6 @@ async function startSession(userId, onUpdate) {
                     logger.warn(`[SESSION] Retry failed: ${e.message}. Falling back to bot number...`);
                   }
                 }
-
-                // Fallback: send to bot's own number
                 if (!sent) {
                   try {
                     await sock.sendMessage(botJid, { text: startupMsg });
@@ -420,7 +423,6 @@ async function startSession(userId, onUpdate) {
                   }
                 }
               } else {
-                // No group configured — send to bot number
                 try {
                   await sock.sendMessage(botJid, { text: startupMsg });
                   logger.info(`[SESSION] Startup message sent to bot number (no group)`);
@@ -443,7 +445,6 @@ async function startSession(userId, onUpdate) {
         for (const msg of messages) {
           if (!msg.message) continue;
 
-          // ── Deduplication ──────────────────────────────────
           const msgId = msg.key?.id;
           if (msgId) {
             if (_smProcessedIds.has(msgId)) continue;
@@ -451,7 +452,6 @@ async function startSession(userId, onUpdate) {
             if (_smProcessedIds.size > 2000) _smProcessedIds.delete(_smProcessedIds.values().next().value);
           }
 
-          // ── Stale message filter (60s) ─────────────────────
           const msgAge = Math.floor(Date.now() / 1000) - (Number(msg.messageTimestamp) || 0);
           if (msgAge > 60) continue;
 
@@ -495,7 +495,6 @@ async function startSession(userId, onUpdate) {
 async function stopSession(userId) {
   const session = sessions.get(userId);
   if (!session) return;
-  // Flag tells disconnect handler to preserve auth
   session._manualStop = true;
   try {
     session.sock?.end?.();
@@ -533,7 +532,6 @@ function getAllSessions() {
 
 // ── Restore all active sessions on boot ──────────────────────
 async function restoreActiveSessions(onUpdate) {
-  // Find all unique userIds that have saved creds
   const docs = await UserAuthState.find({ key: 'creds' }).lean();
   let restored = 0;
   for (const doc of docs) {
@@ -543,7 +541,7 @@ async function restoreActiveSessions(onUpdate) {
       restored++;
     }
   }
-  logger.info(`[SESSION] Restored ${restored} sessions from DB`);
+  logger.info(`[SESSION] 🔄 Restored ${restored} sessions from DB`);
   return restored;
 }
 
