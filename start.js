@@ -36,7 +36,7 @@ function showBanner() {
 ╠════════════════════════════════════════╣
 ║  Version  : 1.0.0                      ║
 ║  Creator  : UNITY TEAM 🧩              ║
-║  Database : MongoDB                    ║
+║  Database : Local (Temp Fix)           ║
 ║  Commands : 350+                       ║
 ╚════════════════════════════════════════╝`));
   console.log(chalk.gray('\n  Booting up...\n'));
@@ -46,9 +46,9 @@ const messageStore = new Map();
 const msgRetryCounterCache = new NodeCache();
 let sock = null;
 let retryCount      = 0;
-const MAX_RETRIES   = 999;           // 🔥 UNLIMITED RETRY — kabhi stop nahi hoga
-const BASE_DELAY_MS = 3_000;        // 3s first retry
-const MAX_DELAY_MS  = 300_000;      // cap at 5 min
+const MAX_RETRIES   = 999;
+const BASE_DELAY_MS = 3_000;
+const MAX_DELAY_MS  = 300_000;
 
 function getReconnectDelay() {
   const exp   = Math.min(retryCount, 8);
@@ -86,14 +86,15 @@ async function connectToWhatsApp() {
   pairingStarted = false;
 
   try {
-    await db.connect();
-
-    const { state, saveCreds } = await db.useMongoDBAuthState();
+    // 🔥 FIX: MongoDB conflict se bachne ke liye LOCAL FILE AUTH use karo
+    console.log(chalk.yellow('[START] Using local auth (temp fix — OTP will work)'));
+    const { state, saveCreds } = await useMultiFileAuthState('./auth_info_baileys');
+    
     const { version } = await fetchLatestBaileysVersion();
     const logger = pino({ level: 'silent' });
 
-    const _botCfg    = await db.getBotConfig('config').catch(() => null);
-    const _autoOnline = _botCfg?.features?.autoOnline ?? cfg.features?.autoOnline ?? false;
+    // AutoOnline from config
+    const _autoOnline = cfg.features?.autoOnline ?? false;
 
     sock = makeWASocket({
       version,
