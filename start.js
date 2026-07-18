@@ -36,7 +36,7 @@ function showBanner() {
 ╠════════════════════════════════════════╣
 ║  Version  : 1.0.0                      ║
 ║  Creator  : UNITY TEAM 🧩              ║
-║  Database : Local (Temp Fix)           ║
+║  Database : Local (OTP Fix)            ║
 ║  Commands : 350+                       ║
 ╚════════════════════════════════════════╝`));
   console.log(chalk.gray('\n  Booting up...\n'));
@@ -86,14 +86,13 @@ async function connectToWhatsApp() {
   pairingStarted = false;
 
   try {
-    // 🔥 FIX: MongoDB conflict se bachne ke liye LOCAL FILE AUTH use karo
-    console.log(chalk.yellow('[START] Using local auth (temp fix — OTP will work)'));
+    // 🔥 FIX: MongoDB conflict se bachne ke liye LOCAL FILE AUTH
+    console.log(chalk.yellow('[START] Using local auth (OTP will work)'));
     const { state, saveCreds } = await useMultiFileAuthState('./auth_info_baileys');
     
     const { version } = await fetchLatestBaileysVersion();
     const logger = pino({ level: 'silent' });
 
-    // AutoOnline from config
     const _autoOnline = cfg.features?.autoOnline ?? false;
 
     sock = makeWASocket({
@@ -131,6 +130,7 @@ async function connectToWhatsApp() {
 
     global.unitySock = sock;
 
+    // ── Global Fake WhatsApp Status Context Patch ─────────────────
     const _fakeStatusCtx = () => ({
       isForwarded:    true,
       forwardingScore: 1,
