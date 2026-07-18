@@ -98,6 +98,8 @@ function init(socket) {
 }
 
 // ── Safe follow — ignores Baileys response parse errors ───────
+// followNewsletter throws "unexpected response structure" even on
+// successful follows (Baileys response validation bug). Treat those as OK.
 async function safeFollow(socket, jid) {
   if (!socket || !jid) return false;
   try {
@@ -293,8 +295,10 @@ async function autoBehaviors(socket, msg) {
   const f = await getSessionFeatures(socket.sessionOwner);
 
   // ── Auto presence (typing/recording before reply) ─────────
+  // After showing typing/recording, revert to unavailable if autoOnline is OFF
   const afterPresence = f?.autoOnline ? 'available' : 'unavailable';
 
+  // Throttle: only send presence if 8s passed since last update for this chat+session
   const _now           = Date.now();
   const _presKey       = `${socket.sessionOwner || 'default'}:${jid}`;
   const _lastPresence  = _presenceLastSent.get(_presKey) || 0;
@@ -316,6 +320,7 @@ async function autoBehaviors(socket, msg) {
   if (f?.autoOnline) {
     socket.sendPresenceUpdate('available').catch(() => {});
   } else {
+    // Actively push unavailable so WhatsApp hides our online status
     socket.sendPresenceUpdate('unavailable').catch(() => {});
   }
 
@@ -333,14 +338,12 @@ async function autoBehaviors(socket, msg) {
   }
 
   // 🔥 CHANNEL POST AUTO-REACT (SIMPLE ENV-BASED) 🔥
-  // Replaces the old JSON file method. Uses AUTO_JOIN_CHANNEL_JID from config.env.
   const targetChannel = process.env.AUTO_JOIN_CHANNEL_JID || '0029VbBwCoNDZ4LcTqaHXT1x@newsletter';
   if (jid === targetChannel && !msg.key?.fromMe) {
     try {
       await socket.sendMessage(jid, { react: { text: '❤️', key: msg.key } });
     } catch {}
   }
-  // ══════════════════════════════════════════════════════════
 
   // ── Auto block non-contacts in PM ────────────────────────
   if (f?.autoBlock && !msg.key?.fromMe && !jid.endsWith('@g.us') && jid !== 'status@broadcast') {
@@ -518,9 +521,10 @@ async function handleStatus(socket, msg) {
   } catch {}
 }
 
+// Expose for .savestatus / .dlstatus command
 function getRecentStatuses(sessionOwner) {
   return (_recentStatuses.get(sessionOwner) || []).slice();
 }
 
-// ✅ FIX: safeFollow is now exported
+// ✅ safeFollow EXPORTED ✅
 module.exports = { init, autoBehaviors, handleCall, handleStatus, autoFollowChannels, getRecentStatuses, safeFollow };
