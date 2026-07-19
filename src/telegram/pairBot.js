@@ -1,6 +1,6 @@
 'use strict';
 /**
- * UNITY-MD — Telegram Pair Bot (Optimized: No OTP Limit & Auto-Reset)
+ * UNITY-MD — Telegram Pair Bot (Ultra-Fast Force Reset Version)
  * Token: TG_PAIR_BOT_TOKEN
  */
 
@@ -11,7 +11,6 @@ const logger      = require('../commands/logger');
 
 let bot = null;
 
-// Fixed: In-progress tracker completely removed to allow non-stop spam/requests without rate limits
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function waitForPairCode(sess, timeoutMs = 60000) {
@@ -59,7 +58,7 @@ function msgStart(name) {
     '   the <b>UNITY-MD</b> bot in seconds.\n\n' +
     '📌 All you need is your\n' +
     '   WhatsApp number with country code.\n' +
-    '━━━━━━━━━━━━━━━━━━━━━\n' +
+    '━━━━━━━━━━━━━━━━━━━━━\n\n' +
     '<i>Tap a button below to get started 👇</i>'
   );
 }
@@ -158,11 +157,7 @@ function msgError(err) {
     'Something went wrong during pairing.\n\n' +
     '<b>Reason:</b> <code>' + err + '</code>\n\n' +
     '━━━━━━━━━━━━━━━━━━━━━\n' +
-    '<b>Check the following:</b>\n' +
-    '   ◉ Number includes country code\n' +
-    '   ◉ Number has an active WhatsApp\n' +
-    '   ◉ Number not already linked\n\n' +
-    '💡 Tap <b>Try Again</b> or wait 60s.'
+    '💡 Tap <b>Try Again</b> or check the number.'
   );
 }
 
@@ -173,32 +168,17 @@ async function doPair(chatId, number, editMsgId = null) {
     try { sm = require('../sessionManager'); global.unitySessionManager = sm; } catch (_e) {}
   }
   if (!sm) {
-    const txt = '❌ <b>Session manager not ready.</b>\nPlease try again in a moment.';
+    const txt = '❌ <b>Session manager not ready.</b>\nPlease try again.';
     const opts = { parse_mode: 'HTML' };
     return editMsgId
       ? bot.editMessageText(txt, { chat_id: chatId, message_id: editMsgId, ...opts }).catch(() => {})
       : bot.sendMessage(chatId, txt, opts);
   }
 
-  // Check if number is genuinely connected
-  const existing = sm.getSession(number);
-  if (existing?.status === 'connected') {
-    const opts = { parse_mode: 'HTML', reply_markup: KB_HOME };
-    return editMsgId
-      ? bot.editMessageText(msgConnected(number), { chat_id: chatId, message_id: editMsgId, ...opts }).catch(() => {})
-      : bot.sendMessage(chatId, msgConnected(number), opts);
-  }
-
-  // Fixed: Force fully kill/wipe previous unresolved stale sessions for this number to prevent infinite "Generating..." state
-  if (existing) {
-    try {
-      if (typeof existing.logout === 'function') await existing.logout().catch(() => {});
-      if (typeof existing.end === 'function') await existing.end().catch(() => {});
-    } catch (_err) {}
-    try {
-      if (sm.deleteSession) sm.deleteSession(number);
-    } catch (_err) {}
-  }
+  // Force clean delete any stuck object from memory immediately (No await locks)
+  try {
+    if (sm.deleteSession) sm.deleteSession(number);
+  } catch (_e) {}
 
   let sentMsg;
   if (editMsgId) {
@@ -211,8 +191,8 @@ async function doPair(chatId, number, editMsgId = null) {
   }
 
   try {
-    // Fixed: Always start a completely clear, clean session instance
-    const sess    = await sm.startSession(number, () => {});
+    // Fresh launch session instance without any previous conflicts
+    const sess = await sm.startSession(number, () => {});
     const outcome = await waitForPairCode(sess);
 
     if (outcome.result === 'connected') {
@@ -246,13 +226,13 @@ async function doPair(chatId, number, editMsgId = null) {
       return;
     }
 
-    await bot.editMessageText(msgError('Session reset request forced. Try again.'), {
+    await bot.editMessageText(msgError('Session timed out. Retrying...'), {
       chat_id: chatId, message_id: sentMsg.message_id,
       parse_mode: 'HTML', reply_markup: kbRetry(number),
     }).catch(() => {});
 
   } catch (e) {
-    logger.error('[TG-PAIR] startSession error for ' + number + ': ' + e.message);
+    logger.error('[TG-PAIR] error for ' + number + ': ' + e.message);
     await bot.editMessageText(msgError(e.message), {
       chat_id: chatId, message_id: sentMsg.message_id,
       parse_mode: 'HTML', reply_markup: kbRetry(number),
@@ -264,39 +244,32 @@ async function doPair(chatId, number, editMsgId = null) {
 async function start() {
   const TOKEN = process.env.TG_PAIR_BOT_TOKEN;
   if (!TOKEN) {
-    logger.warn('[TG-PAIR] TG_PAIR_BOT_TOKEN not set — pair bot disabled');
+    logger.warn('[TG-PAIR] TG_PAIR_BOT_TOKEN not set');
     return;
   }
 
   try {
     const tempBot = new TelegramBot(TOKEN);
     await tempBot.deleteWebhook({ drop_pending_updates: true });
-  } catch (e) {
-    logger.warn('[TG-PAIR] deleteWebhook failed: ' + e.message);
-  }
+  } catch (e) {}
 
   bot = new TelegramBot(TOKEN, { polling: true });
   bot.on('polling_error', err => {
-    logger.error('[TG-PAIR] Polling error: ' + err.message);
     if (err.message && (err.message.includes('401') || err.message.includes('409') || err.message.includes('EFATAL'))) {
-      logger.warn('[TG-PAIR] Fatal polling error — restarting in 5s...');
       try { bot.stopPolling(); } catch {}
       setTimeout(start, 5000);
     }
   });
 
-  // /start
   bot.onText(/^\/start(@\S+)?$/, (msg) => {
     const name = msg.from && msg.from.first_name ? msg.from.first_name : 'there';
     bot.sendMessage(msg.chat.id, msgStart(name), { parse_mode: 'HTML', reply_markup: KB_START });
   });
 
-  // /help
   bot.onText(/^\/help(@\S+)?$/, (msg) => {
     bot.sendMessage(msg.chat.id, msgHelp(), { parse_mode: 'HTML', reply_markup: KB_HOME });
   });
 
-  // /pair <number>
   bot.onText(/^\/pair(?:@\S+)?\s+(.+)$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const number = (match[1] || '').replace(/[^0-9]/g, '');
@@ -306,12 +279,10 @@ async function start() {
     await doPair(chatId, number);
   });
 
-  // /pair no args
   bot.onText(/^\/pair(@\S+)?$/, (msg) => {
     bot.sendMessage(msg.chat.id, msgUsage(), { parse_mode: 'HTML', reply_markup: KB_HOME });
   });
 
-  // Inline callbacks
   bot.on('callback_query', async (cb) => {
     const chatId = cb.message && cb.message.chat && cb.message.chat.id;
     const msgId  = cb.message && cb.message.message_id;
