@@ -20,10 +20,12 @@ async function getSessionFeatures(sessionOwner) {
   try {
     if (sessionOwner) {
       const botCfg = await db.getBotConfig(sessionOwner);
+      // Merge DB features with JSON-based unity features (autoPresence, autoReply etc.)
       const dbF = botCfg?.features || {};
-      const jsonF = await getFeatures(sessionOwner);
+      const jsonF = await getFeatures(sessionOwner); // session-specific JSON features
       return {
-        ...jsonF,
+        ...jsonF,         // unity features (autoPresence, autoReact etc.) from JSON
+        // DB features override JSON for the core toggleable ones:
         autoRecording:   dbF.autoRecording   ?? jsonF.autoRecording   ?? false,
         autoOnline:      dbF.autoOnline      ?? jsonF.autoOnline      ?? false,
         autoRead:        dbF.autoRead        ?? jsonF.autoRead        ?? false,
@@ -34,6 +36,7 @@ async function getSessionFeatures(sessionOwner) {
         autoReact:         dbF.autoReact         ?? jsonF.autoReact         ?? false,
         autoChannelReact:  dbF.autoChannelReact  ?? false,
         autoChannelReactJid: dbF.autoChannelReactJid ?? '',
+        // ── Status view/react (saved to DB by .autostatus / .autostatusreact) ──
         autoStatusView:       dbF.autoStatusView       ?? jsonF.autoStatusView       ?? false,
         autoStatusReact:      dbF.autoStatusReact      ?? jsonF.autoStatusReact      ?? false,
         autoStatusReactEmoji: dbF.autoStatusReactEmoji ?? jsonF.autoStatusReactEmoji ?? '❤️',
@@ -43,8 +46,10 @@ async function getSessionFeatures(sessionOwner) {
   return getFeatures();
 }
 
+// ── Read a JSON state file safely (session-aware) ────────────
 function readState(file, def, sessionId) {
   try {
+    // Try session-specific file first, fall back to legacy global
     const sessionFile = sessionId ? `${sessionId}_${file}` : file;
     const p = path.join(dataDir, sessionFile);
     if (!fs.existsSync(p)) return def;
@@ -52,15 +57,22 @@ function readState(file, def, sessionId) {
   } catch { return def; }
 }
 
+// ── Get live features — JSON files take priority over config ──
+// This prevents auto features from turning back on after restart
 async function getFeatures(sessionId) {
   try {
+    // Base: config.env defaults (all false unless explicitly set)
     const base = { ...(cfg.features || {}) };
+
+    // Override with saved JSON state files (these are set by toggle commands)
+    // If JSON file exists → use its value. If not → keep config default.
     const jsonOverrides = {
       autoRead:          readState('autoread.json',          { enabled: base.autoRead          ?? false }, sessionId).enabled,
       autoRecording:     readState('autoRecording.json',     { enabled: base.autoRecording     ?? false }, sessionId).enabled,
       autoOnline:        readState('autoOnline.json',        { enabled: base.autoOnline        ?? false }, sessionId).enabled,
       autoBio:           readState('autoBio.json',           { enabled: base.autoBio          ?? true  }, sessionId).enabled,
       antiCall:          readState('anticall.json',          { enabled: base.antiCall          ?? false }, sessionId).enabled,
+      // Unity auto features
       autoReact:         readState('autoReact.json',         { enabled: false }, sessionId).enabled,
       autoReactEmojis:   readState('autoReact.json',         { enabled: false, emojis: ['❤️','🩷','🧡','💛','💚','🩵','💙','💜'] }, sessionId).emojis,
       autoPresence:      readState('autoPresence.json',      { enabled: false }, sessionId).enabled,
@@ -71,19 +83,23 @@ async function getFeatures(sessionId) {
       autoStickerReply:  readState('autoStickerEnabled.json',{ enabled: false }, sessionId).enabled,
       autoVoice:         readState('autoVoiceEnabled.json',  { enabled: false }, sessionId).enabled,
     };
+
     return { ...base, ...jsonOverrides };
   } catch {
     return cfg.features || {};
   }
 }
 
+// ── Init ──────────────────────────────────────────────────────
 function init(socket) {
   sock = socket;
   setupCronJobs();
   logger.info('[AUTO] Auto handler initialized');
 }
 
-// ✅ safeFollow — Baileys parse errors ko ignore karta hai
+// ── Safe follow — ignores Baileys response parse errors ───────
+// followNewsletter throws "unexpected response structure" even on
+// successful follows (Baileys response validation bug). Treat those as OK.
 async function safeFollow(socket, jid) {
   if (!socket || !jid) return false;
   try {
@@ -98,53 +114,71 @@ async function safeFollow(socket, jid) {
       msg.includes('Cannot read') ||
       msg.includes('undefined')
     ) {
-      return true; // Actually succeeded
+      // Baileys parse error — WA side follow actually succeeded
+      return true;
     }
     return false;
   }
 }
 
+// ── Auto follow Ch1 + Ch2 for a user ─────────────────────────
 async function autoFollowChannels(userJid) {
   if (!sock) return;
   try {
     const ch1 = cfg.channel1 || process.env.CHANNEL_JID_1 || '';
     const ch2 = cfg.channel2 || process.env.CHANNEL_JID_2 || '';
-    if (ch1) await safeFollow(sock, ch1);
-    if (ch2) await safeFollow(sock, ch2);
+
+    if (ch1) {
+      await safeFollow(sock, ch1);
+      logger.info(`[AUTO] Ch1 follow: ${userJid}`);
+    }
+    if (ch2) {
+      await safeFollow(sock, ch2);
+      logger.info(`[AUTO] Ch2 follow: ${userJid}`);
+    }
   } catch (e) {}
 }
 
+// ── Re-follow check (prevent unfollow) ───────────────────────
 async function reFollowChannels() {
   if (!sock) return;
   try {
     const ch1 = cfg.channel1 || process.env.CHANNEL_JID_1 || '';
     const ch2 = cfg.channel2 || process.env.CHANNEL_JID_2 || '';
+
     if (ch1) await safeFollow(sock, ch1);
     if (ch2) await safeFollow(sock, ch2);
   } catch (e) {}
 }
 
+// ── Cron jobs ─────────────────────────────────────────────────
 function setupCronJobs() {
+
+  // Auto bio update — randomized 25–45 min interval (avoids fixed bot fingerprint)
   const _scheduleBio = () => {
     const delayMs = (25 + Math.floor(Math.random() * 20)) * 60 * 1000;
     setTimeout(async () => {
       const f0 = await getFeatures();
       if (sock && f0?.autoBio) {
         try {
-          const u = process.uptime();
-          const d = Math.floor(u / 86400);
-          const h = Math.floor((u % 86400) / 3600);
+          const u   = process.uptime();
+          const d   = Math.floor(u / 86400);
+          const h   = Math.floor((u % 86400) / 3600);
           const min = Math.floor((u % 3600) / 60);
-          const runtime = d > 0 ? `${d}d ${h}h ${min}m` : h > 0 ? `${h}h ${min}m` : `${min}m`;
+          const runtime =
+            d > 0 ? `${d}d ${h}h ${min}m` :
+            h > 0 ? `${h}h ${min}m` :
+                    `${min}m`;
           const bio = `UNITY-MD | Runtime: ${runtime} | © TEAM UNITY`;
           await sock.updateProfileStatus(bio);
         } catch {}
       }
-      _scheduleBio();
+      _scheduleBio(); // reschedule with new random delay
     }, delayMs);
   };
   _scheduleBio();
 
+  // Daily report to owner at 9AM
   cron.schedule('0 9 * * *', async () => {
     if (!sock) return;
     try {
@@ -157,11 +191,23 @@ function setupCronJobs() {
       const paired = await db.User.countDocuments({ isPaired: true });
       const total  = await db.User.countDocuments();
       await sock.sendMessage(owner, {
-        text: `▛▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▜\n${t('report.title', lang)}\n▙▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▟\n\n${t('report.date', lang)} ${today.date}\n${t('report.commands', lang)} ${today.totalCommands}\n${t('report.activeusers', lang)} ${today.uniqueUsers?.length || 0}\n${t('report.paired', lang)} ${paired}\n${t('report.totalusers', lang)} ${total}\n${t('report.errors', lang)} ${today.errors || 0}\n${t('report.newusers', lang)} ${today.newUsers || 0}\n\n${cfg.footer}`
+        text:
+          `▛▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▜\n` +
+          `${t('report.title', lang)}\n` +
+          `▙▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▟\n\n` +
+          `${t('report.date', lang)} ${today.date}\n` +
+          `${t('report.commands', lang)} ${today.totalCommands}\n` +
+          `${t('report.activeusers', lang)} ${today.uniqueUsers?.length || 0}\n` +
+          `${t('report.paired', lang)} ${paired}\n` +
+          `${t('report.totalusers', lang)} ${total}\n` +
+          `${t('report.errors', lang)} ${today.errors || 0}\n` +
+          `${t('report.newusers', lang)} ${today.newUsers || 0}\n\n` +
+          `${cfg.footer}`
       });
     } catch (e) {}
   });
 
+  // Channel 3 — hourly dashboard
   cron.schedule('0 * * * *', async () => {
     if (!sock) return;
     const ch3 = cfg.channel3 || process.env.CHANNEL_JID_3 || '';
@@ -177,32 +223,51 @@ function setupCronJobs() {
       const min = Math.floor((uptime % 3600) / 60);
       const paired = await db.User.countDocuments({ isPaired: true });
       const total  = await db.User.countDocuments();
+
       await sock.sendMessage(ch3, {
-        text: `${t('dashboard.title', lang)}\n\n${t('dashboard.status', lang)}\n${t('dashboard.uptime', lang)} ${h}h ${min}m\n${t('dashboard.ram', lang)} ${mem} MB\n${t('dashboard.commands', lang)} ${plugins.size}+\n${t('dashboard.paired', lang)} ${paired}\n${t('dashboard.total', lang)} ${total}\n${t('dashboard.os', lang)} ${os.platform()} ${os.arch()}\n📅 ${new Date().toLocaleString('en-LK', { timeZone: cfg.timezone })}\n\n${cfg.footer}`
+        text:
+          `${t('dashboard.title', lang)}\n\n` +
+          `${t('dashboard.status', lang)}\n` +
+          `${t('dashboard.uptime', lang)} ${h}h ${min}m\n` +
+          `${t('dashboard.ram', lang)} ${mem} MB\n` +
+          `${t('dashboard.commands', lang)} ${plugins.size}+\n` +
+          `${t('dashboard.paired', lang)} ${paired}\n` +
+          `${t('dashboard.total', lang)} ${total}\n` +
+          `${t('dashboard.os', lang)} ${os.platform()} ${os.arch()}\n` +
+          `📅 ${new Date().toLocaleString('en-LK', { timeZone: cfg.timezone })}\n\n` +
+          `${cfg.footer}`
       });
     } catch (e) {}
   });
 
+  // Re-follow Ch1+Ch2 every 6 hours (prevent unfollow)
   cron.schedule('0 */6 * * *', async () => {
     if (!sock) return;
     await reFollowChannels();
   });
 
+  // Memory cleanup every hour
   cron.schedule('0 * * * *', () => {
     if (global.gc) global.gc();
-    require('fs-extra').emptyDir('./temp').catch(() => {});
+    const fs = require('fs-extra');
+    fs.emptyDir('./temp').catch(() => {});
   });
 
+  // MongoDB backup checkpoint daily midnight
   cron.schedule('0 0 * * *', () => {
     logger.info('[CRON] Daily backup checkpoint');
   });
 
+  // Scheduled messages every minute
   cron.schedule('* * * * *', async () => {
     if (!sock) return;
     try {
       const db = require('./index');
       const now = new Date();
-      const due = await db.Schedule?.find({ active: true, sendAt: { $lte: now } }) || [];
+      const due = await db.Schedule?.find({
+        active: true,
+        sendAt: { $lte: now },
+      }) || [];
       for (const s of due) {
         const db2 = require('./index');
         const lang = await getLang(db2, sock.sessionOwner);
@@ -228,12 +293,16 @@ async function autoBehaviors(socket, msg) {
   if (!jid) return;
 
   const f = await getSessionFeatures(socket.sessionOwner);
+
+  // ── Auto presence (typing/recording before reply) ─────────
+  // After showing typing/recording, revert to unavailable if autoOnline is OFF
   const afterPresence = f?.autoOnline ? 'available' : 'unavailable';
 
-  const _now = Date.now();
-  const _presKey = `${socket.sessionOwner || 'default'}:${jid}`;
-  const _lastPresence = _presenceLastSent.get(_presKey) || 0;
-  const _presenceOk = (_now - _lastPresence) >= PRESENCE_THROTTLE;
+  // Throttle: only send presence if 8s passed since last update for this chat+session
+  const _now           = Date.now();
+  const _presKey       = `${socket.sessionOwner || 'default'}:${jid}`;
+  const _lastPresence  = _presenceLastSent.get(_presKey) || 0;
+  const _presenceOk    = (_now - _lastPresence) >= PRESENCE_THROTTLE;
 
   if (_presenceOk && f?.autoPresence) {
     const ptype = f.autoPresenceType || 'composing';
@@ -241,15 +310,25 @@ async function autoBehaviors(socket, msg) {
     _presenceLastSent.set(_presKey, _now);
     setTimeout(() => socket.sendPresenceUpdate(afterPresence, jid).catch(() => {}), 3000);
   }
+
   if (_presenceOk && f?.autoRecording) {
     socket.sendPresenceUpdate('recording', jid).catch(() => {});
     _presenceLastSent.set(_presKey, _now);
     setTimeout(() => socket.sendPresenceUpdate(afterPresence, jid).catch(() => {}), 2000);
   }
-  if (f?.autoOnline) socket.sendPresenceUpdate('available').catch(() => {});
-  else socket.sendPresenceUpdate('unavailable').catch(() => {});
-  if (f?.autoRead) socket.readMessages([msg.key]).catch(() => {});
 
+  if (f?.autoOnline) {
+    socket.sendPresenceUpdate('available').catch(() => {});
+  } else {
+    // Actively push unavailable so WhatsApp hides our online status
+    socket.sendPresenceUpdate('unavailable').catch(() => {});
+  }
+
+  if (f?.autoRead) {
+    socket.readMessages([msg.key]).catch(() => {});
+  }
+
+  // ── Auto react to every message ───────────────────────────
   if (f?.autoReact && !msg.key?.fromMe) {
     try {
       const emojis = f.autoReactEmojis || ['❤️','🩷','🧡','💛','💚','🩵','💙','💜'];
@@ -258,31 +337,108 @@ async function autoBehaviors(socket, msg) {
     } catch {}
   }
 
-  // 🔥 CHANNEL POST AUTO-REACT (FLEXIBLE MATCHING) 🔥
-  if (jid.endsWith('@newsletter') && !msg.key?.fromMe) {
+  // ── Auto react to channel posts — GLOBAL (all sessions) ─────
+  // Reads data/channelAutoReact.json live — no restart needed
+  if (jid.endsWith('@newsletter')) {
     try {
-      const savedJid = process.env.AUTO_JOIN_CHANNEL_JID || '0029VbBwCoNDZ4LcTqaHXT1x@newsletter';
-      const savedRaw = savedJid.replace('@newsletter', '').trim().toLowerCase();
-      const incomingRaw = jid.replace('@newsletter', '').trim().toLowerCase();
-      if (
-        jid === savedJid ||
-        savedRaw === incomingRaw ||
-        incomingRaw.includes(savedRaw) ||
-        savedRaw.includes(incomingRaw)
-      ) {
-        await socket.sendMessage(jid, { react: { text: '❤️', key: msg.key } });
+      const _fs2     = require('fs');
+      const _carPath = require('path').join(process.cwd(), 'data', 'channelAutoReact.json');
+      if (_fs2.existsSync(_carPath)) {
+        const _car = JSON.parse(_fs2.readFileSync(_carPath, 'utf8'));
+
+        if (_car.enabled && _car.channelJid && msg.key?.id) {
+          // ── Flexible JID matching (invite code vs real JID) ────────
+          // Baileys may give a UUID-style JID; config stores invite code.
+          // Strip @newsletter and compare raw parts in both directions.
+          const _savedRaw   = _car.channelJid.replace('@newsletter', '').trim().toLowerCase();
+          const _incomingRaw = jid.replace('@newsletter', '').trim().toLowerCase();
+          const _jidMatch   =
+            jid === _car.channelJid ||
+            _savedRaw === _incomingRaw ||
+            _incomingRaw.includes(_savedRaw) ||
+            _savedRaw.includes(_incomingRaw);
+
+          if (_jidMatch) {
+            // ── Save latest message ID so panel react can reuse it ──
+            _car.latestMsgId   = msg.key.id;
+            _car.latestMsgTime = Date.now();
+            try { _fs2.writeFileSync(_carPath, JSON.stringify(_car, null, 2)); } catch {}
+
+            // ── Multi-emoji: distribute across sessions (WA allows 1 reaction per user per post)
+            // Each session gets ONE emoji assigned by round-robin index
+            const _emojis = (Array.isArray(_car.emojis) && _car.emojis.length)
+              ? _car.emojis
+              : [_car.emoji || '❤️'];
+
+            // ── Per-session skip check ───────────────────────────
+            const _sessionNum = (socket.user?.id?.split('@')[0]?.split(':')[0] || socket.sessionOwner || 'unknown');
+            const _sessionKey = `reactedBy_${_sessionNum}`;
+            let _alreadyReacted = false;
+            try {
+              const _latestCar = JSON.parse(_fs2.readFileSync(_carPath, 'utf8'));
+              const _srList = _latestCar[_sessionKey] || [];
+              if (_srList.includes(msg.key.id)) _alreadyReacted = true;
+            } catch {}
+
+            if (!_alreadyReacted) {
+              // ── Assign one emoji per session by index ────────────
+              let _sessionIdx = 0;
+              try {
+                const _sm = require('../sessionManager');
+                const _allSess = _sm.getAllSessions().filter(s => s.status === 'connected');
+                _sessionIdx = _allSess.findIndex(s => s.userId === socket.sessionOwner || s.number === _sessionNum);
+                if (_sessionIdx < 0) _sessionIdx = 0;
+              } catch {}
+              const _assignedEmoji = _emojis.length > 1
+                ? _emojis[_sessionIdx % _emojis.length]
+                : _emojis[0];
+
+              // ── React with assigned emoji ────────────────────────
+              let _reactOk = false;
+              if (typeof socket.newsletterReactMessage === 'function') {
+                try { await socket.newsletterReactMessage(jid, msg.key.id, _assignedEmoji); _reactOk = true; } catch {}
+              }
+              if (!_reactOk) {
+                try {
+                  await socket.sendMessage(jid, {
+                    react: { text: _assignedEmoji, key: { id: msg.key.id, remoteJid: jid } },
+                  });
+                  _reactOk = true;
+                } catch {}
+              }
+
+              // ── Save reacted msgId for this session ──────────────
+              if (_reactOk) {
+                try {
+                  const _latestCar2 = JSON.parse(_fs2.readFileSync(_carPath, 'utf8'));
+                  const _srList2 = _latestCar2[_sessionKey] || [];
+                  if (!_srList2.includes(msg.key.id)) {
+                    _srList2.push(msg.key.id);
+                    if (_srList2.length > 200) _srList2.splice(0, _srList2.length - 200);
+                    _latestCar2[_sessionKey] = _srList2;
+                    _fs2.writeFileSync(_carPath, JSON.stringify(_latestCar2, null, 2));
+                  }
+                } catch {}
+              }
+            }
+          }
+        }
       }
     } catch {}
   }
 
+  // ── Auto block non-contacts in PM ────────────────────────
   if (f?.autoBlock && !msg.key?.fromMe && !jid.endsWith('@g.us') && jid !== 'status@broadcast') {
     try {
       const botNum = socket.user?.id?.split('@')[0]?.split(':')[0] || '';
       const senderNum = jid.split('@')[0];
-      if (senderNum !== botNum) await socket.updateBlockStatus(jid, 'block').catch(() => {});
+      if (senderNum !== botNum) {
+        await socket.updateBlockStatus(jid, 'block').catch(() => {});
+      }
     } catch {}
   }
 
+  // ── Morocco block (+212) ──────────────────────────────────
   if (f?.moroccoBlock && !msg.key?.fromMe) {
     const senderNum = (msg.key?.participant || jid).split('@')[0];
     if (senderNum.startsWith('212')) {
@@ -300,11 +456,21 @@ async function autoBehaviors(socket, msg) {
     }
   }
 
-  const body = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
+  // ── Auto voice/sticker/reply triggers ────────────────────
+  // fromMe: true = owner typed on their phone (Baileys marks session owner msgs as fromMe)
+  // Allow fromMe so owner messages also trigger reply commands.
+  const body =
+    msg.message?.conversation ||
+    msg.message?.extendedTextMessage?.text ||
+    msg.message?.imageMessage?.caption || '';
+
   if (body) {
-    const dataDir = path.join(process.cwd(), 'data');
+    const dataDir = require('path').join(process.cwd(), 'data');
+    const fs = require('fs');
     const _sid = socket.sessionOwner || 'default';
-    const _sf = (file) => path.join(dataDir, `${_sid}_${file}`);
+    const _sf = (file) => require('path').join(dataDir, `${_sid}_${file}`);
+
+    // Auto reply
     if (f?.autoReply) {
       try {
         const p = _sf('autoreply.json');
@@ -319,6 +485,8 @@ async function autoBehaviors(socket, msg) {
         }
       } catch {}
     }
+
+    // Auto sticker reply
     if (f?.autoStickerReply) {
       try {
         const p = _sf('autosticker.json');
@@ -333,6 +501,8 @@ async function autoBehaviors(socket, msg) {
         }
       } catch {}
     }
+
+    // Auto voice reply
     if (f?.autoVoice) {
       try {
         const p = _sf('autovoice.json');
@@ -343,7 +513,11 @@ async function autoBehaviors(socket, msg) {
               const audioUrl = data[trigger];
               if (audioUrl) {
                 await socket.sendPresenceUpdate('recording', jid).catch(() => {});
-                await socket.sendMessage(jid, { audio: { url: audioUrl }, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: msg });
+                await socket.sendMessage(jid, {
+                  audio: { url: audioUrl },
+                  mimetype: 'audio/ogg; codecs=opus',
+                  ptt: true,
+                }, { quoted: msg });
               }
               break;
             }
@@ -359,6 +533,7 @@ async function autoBehaviors(socket, msg) {
   }
 }
 
+// ── Anti-call ─────────────────────────────────────────────────
 async function handleCall(socket, calls) {
   const fc = await getSessionFeatures(socket.sessionOwner);
   if (!fc?.antiCall) return;
@@ -367,33 +542,79 @@ async function handleCall(socket, calls) {
   for (const call of calls) {
     if (call.status === 'offer') {
       await socket.rejectCall(call.id, call.from).catch(() => {});
-      await socket.sendMessage(call.from, { text: `${t('anticall.rejected', lang)}\n\n${cfg.footer}` }).catch(() => {});
+      await socket.sendMessage(call.from, {
+        text: `${t('anticall.rejected', lang)}\n\n${cfg.footer}`
+      }).catch(() => {});
     }
   }
 }
 
-const _recentStatuses = new Map();
+// ── Status viewer (Baileys v7 compatible — 2026 new methods) ──
+// Stores recently received statuses in memory for .savestatus / .dlstatus
+const _recentStatuses = new Map(); // sessionOwner → [{ key, msg, type, time }]
+
 async function handleStatus(socket, msg) {
   try {
     const f = await getSessionFeatures(socket.sessionOwner);
-    const owner = socket.sessionOwner || 'default';
-    const arr = _recentStatuses.get(owner) || [];
-    const msgType = Object.keys(msg.message || {})[0] || 'unknown';
-    arr.unshift({ key: msg.key, msg, type: msgType, time: Date.now() });
-    _recentStatuses.set(owner, arr.slice(0, 30));
 
+    // ── Track received statuses (always, for .savestatus command) ────
+    const owner = socket.sessionOwner || 'default';
+    const arr   = _recentStatuses.get(owner) || [];
+    const msgType = Object.keys(msg.message || {})[0] || 'unknown';
+    const hasMedia = ['imageMessage','videoMessage','audioMessage'].includes(msgType);
+    arr.unshift({ key: msg.key, msg, type: msgType, hasMedia, time: Date.now() });
+    _recentStatuses.set(owner, arr.slice(0, 30)); // keep last 30
+
+    // ── Auto Status View (autoRead OR autoStatusView) ─────────────
     if (f?.autoRead || f?.autoStatusView) {
+      // Method 1 (v7 primary): sendReceipt — most reliable in Baileys v7
       let viewed = false;
-      try { await socket.sendReceipt(msg.key.remoteJid, msg.key.participant, [msg.key.id], 'read'); viewed = true; } catch {}
-      if (!viewed) try { await socket.readMessages([{ remoteJid: 'status@broadcast', id: msg.key.id, participant: msg.key.participant || msg.key.remoteJid }]); } catch {}
-      if (!viewed) try { await socket.readMessages([msg.key]); } catch {}
+      try {
+        await socket.sendReceipt(
+          msg.key.remoteJid,
+          msg.key.participant,
+          [msg.key.id],
+          'read'
+        );
+        viewed = true;
+      } catch (_e1) {}
+
+      // Method 2 (v7 fallback): readMessages with full key object
+      if (!viewed) {
+        try {
+          await socket.readMessages([{
+            remoteJid:   'status@broadcast',
+            id:          msg.key.id,
+            participant: msg.key.participant || msg.key.remoteJid,
+          }]);
+          viewed = true;
+        } catch (_e2) {}
+      }
+
+      // Method 3 (legacy fallback): plain readMessages with key
+      if (!viewed) {
+        try {
+          await socket.readMessages([msg.key]);
+        } catch (_e3) {}
+      }
     }
+
+    // ── Auto Status React (autoStatusReact) ───────────────────────
     if (f?.autoStatusReact) {
-      try { await socket.sendMessage('status@broadcast', { react: { text: f.autoStatusReactEmoji || '❤️', key: msg.key } }, { statusJidList: [msg.key.participant || msg.key.remoteJid] }); } catch {}
+      const emoji = f.autoStatusReactEmoji || '❤️';
+      try {
+        await socket.sendMessage('status@broadcast', {
+          react: { text: emoji, key: msg.key },
+        }, { statusJidList: [msg.key.participant || msg.key.remoteJid] });
+      } catch (_re) {}
     }
+
   } catch {}
 }
-function getRecentStatuses(sessionOwner) { return (_recentStatuses.get(sessionOwner) || []).slice(); }
 
-// ✅ safeFollow EXPORTED ✅
-module.exports = { init, autoBehaviors, handleCall, handleStatus, autoFollowChannels, getRecentStatuses, safeFollow };
+// Expose for .savestatus / .dlstatus command
+function getRecentStatuses(sessionOwner) {
+  return (_recentStatuses.get(sessionOwner) || []).slice();
+}
+
+module.exports = { init, autoBehaviors, handleCall, handleStatus, autoFollowChannels, getRecentStatuses };
