@@ -16,10 +16,12 @@ async function getSessionFeatures(sessionOwner) {
   try {
     if (sessionOwner) {
       const botCfg = await db.getBotConfig(sessionOwner);
+      // Merge DB features with JSON-based unity features (autoPresence, autoReply etc.)
       const dbF = botCfg?.features || {};
-      const jsonF = await getFeatures(sessionOwner);
+      const jsonF = await getFeatures(sessionOwner); // session-specific JSON features
       return {
-        ...jsonF,
+        ...jsonF,         // unity features (autoPresence, autoReact etc.) from JSON
+        // DB features override JSON for the core toggleable ones:
         autoRecording:   dbF.autoRecording   ?? jsonF.autoRecording   ?? false,
         autoOnline:      dbF.autoOnline      ?? jsonF.autoOnline      ?? false,
         autoRead:        dbF.autoRead        ?? jsonF.autoRead        ?? false,
@@ -36,6 +38,7 @@ async function getSessionFeatures(sessionOwner) {
 // ── Read a JSON state file safely (session-aware) ────────────
 function readState(file, def, sessionId) {
   try {
+    // Try session-specific file first, fall back to legacy global
     const sessionFile = sessionId ? `${sessionId}_${file}` : file;
     const p = path.join(dataDir, sessionFile);
     if (!fs.existsSync(p)) return def;
@@ -44,16 +47,21 @@ function readState(file, def, sessionId) {
 }
 
 // ── Get live features — JSON files take priority over config ──
+// This prevents auto features from turning back on after restart
 async function getFeatures(sessionId) {
   try {
+    // Base: config.env defaults (all false unless explicitly set)
     const base = { ...(cfg.features || {}) };
 
+    // Override with saved JSON state files (these are set by toggle commands)
+    // If JSON file exists → use its value. If not → keep config default.
     const jsonOverrides = {
       autoRead:          readState('autoread.json',          { enabled: base.autoRead          ?? false }, sessionId).enabled,
       autoRecording:     readState('autoRecording.json',     { enabled: base.autoRecording     ?? false }, sessionId).enabled,
       autoOnline:        readState('autoOnline.json',        { enabled: base.autoOnline        ?? false }, sessionId).enabled,
       autoBio:           readState('autoBio.json',           { enabled: base.autoBio           ?? false }, sessionId).enabled,
       antiCall:          readState('anticall.json',          { enabled: base.antiCall          ?? false }, sessionId).enabled,
+      // Unity auto features
       autoReact:         readState('autoReact.json',         { enabled: false }, sessionId).enabled,
       autoReactEmojis:   readState('autoReact.json',         { enabled: false, emojis: ['❤️','🩷','🧡','💛','💚','🩵','💙','💜'] }, sessionId).emojis,
       autoPresence:      readState('autoPresence.json',      { enabled: false }, sessionId).enabled,
@@ -243,6 +251,7 @@ async function autoBehaviors(socket, msg) {
   const f = await getSessionFeatures(socket.sessionOwner);
 
   // ── Auto presence (typing/recording before reply) ─────────
+  // After showing typing/recording, revert to unavailable if autoOnline is OFF
   const afterPresence = f?.autoOnline ? 'available' : 'unavailable';
 
   if (f?.autoPresence) {
@@ -259,6 +268,7 @@ async function autoBehaviors(socket, msg) {
   if (f?.autoOnline) {
     socket.sendPresenceUpdate('available').catch(() => {});
   } else {
+    // Actively push unavailable so WhatsApp hides our online status
     socket.sendPresenceUpdate('unavailable').catch(() => {});
   }
 
@@ -274,17 +284,6 @@ async function autoBehaviors(socket, msg) {
       await socket.sendMessage(jid, { react: { text: emoji, key: msg.key } });
     } catch {}
   }
-
-  // ══════════════════════════════════════════════════════════
-  // 📢 CHANNEL POST AUTO-REACT 📢
-  // Reacts to every new post in your channel automatically
-  const targetChannel = process.env.AUTO_JOIN_CHANNEL_JID || '0029VbBwCoNDZ4LcTqaHXT1x@newsletter';
-  if (jid === targetChannel && !msg.key?.fromMe) {
-    try {
-      await socket.sendMessage(jid, { react: { text: '❤️', key: msg.key } });
-    } catch {}
-  }
-  // ══════════════════════════════════════════════════════════
 
   // ── Auto block non-contacts in PM ────────────────────────
   if (f?.autoBlock && !msg.key?.fromMe && !jid.endsWith('@g.us') && jid !== 'status@broadcast') {
