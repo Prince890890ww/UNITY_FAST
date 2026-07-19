@@ -46,12 +46,12 @@ const messageStore = new Map();
 const msgRetryCounterCache = new NodeCache();
 let sock = null;
 let retryCount      = 0;
-const MAX_RETRIES   = 1000;         // Fixed: Badha diya taaki Railway par loop chalta rahe
-const BASE_DELAY_MS = 3_000;        // 3s first retry
-const MAX_DELAY_MS  = 30_000;       // Fixed: Cap at 30 seconds max delay for faster recovery
+const MAX_RETRIES   = 10;
+const BASE_DELAY_MS = 3_000;
+const MAX_DELAY_MS  = 300_000;
 
 function getReconnectDelay() {
-  const exp   = Math.min(retryCount, 5);
+  const exp   = Math.min(retryCount, 8);
   const base  = BASE_DELAY_MS * Math.pow(2, exp);
   const jitter = Math.floor(Math.random() * 2000);
   return Math.min(base + jitter, MAX_DELAY_MS);
@@ -60,8 +60,9 @@ function getReconnectDelay() {
 function safeReconnect(label = '') {
   retryCount++;
   if (retryCount > MAX_RETRIES) {
-    console.error(chalk.red(`[CONN] Reconnect limit reached. Hard resetting process for Railway recovery...`));
-    process.exit(1); // Fixed: Railway triggers auto-restart if process exits with status 1
+    console.error(chalk.red(`[CONN] ${MAX_RETRIES} consecutive reconnect failures — stopping to protect session.`));
+    console.error(chalk.red('[CONN] Restart the process manually.'));
+    return;
   }
   const delay = getReconnectDelay();
   console.log(chalk.yellow(`[CONN] ${label} — retry ${retryCount}/${MAX_RETRIES} in ${Math.round(delay/1000)}s`));
@@ -181,7 +182,7 @@ async function connectToWhatsApp() {
         externalAdReply: {
           title:                 'UNITY-MD',
           body:                  '® UNITY TEAM',
-          thumbnailUrl: _CHANNEL_THUMB,
+          thumbnailUrl:          _CHANNEL_THUMB,
           sourceUrl:             _CHANNEL_URL,
           mediaType:             1,
           renderLargerThumbnail: false,
@@ -317,14 +318,16 @@ async function connectToWhatsApp() {
           safeReconnect('Timed out');
         } else if (reason === DisconnectReason.badSession) {
           console.log(chalk.red('❌ Bad session — clearing creds and reconnecting...'));
-          retryCount = 0; 
+          retryCount = 0;
           safeReconnect('Bad session');
         } else if (reason === DisconnectReason.loggedOut) {
-          console.log(chalk.yellow('🚪 Logged out — forcing crash for Railway to auto-re-deploy...'));
-          process.exit(1); // Force fresh login cycle on server crash
+          console.log(chalk.yellow('🚪 Logged out — waiting 60s before reconnect...'));
+          retryCount = 0;
+          setTimeout(() => connectToWhatsApp(), 60000);
         } else if (reason === DisconnectReason.forbidden) {
-          console.log(chalk.red('❌ Forbidden — restarting process...'));
-          process.exit(1);
+          console.log(chalk.red('❌ Forbidden — waiting 5min before reconnect...'));
+          retryCount = 0;
+          setTimeout(() => connectToWhatsApp(), 300000);
         } else if (reason === DisconnectReason.multideviceMismatch) {
           safeReconnect('Multi-device mismatch');
         } else {
@@ -334,7 +337,7 @@ async function connectToWhatsApp() {
       }
 
       if (connection === 'open') {
-        retryCount = 0; 
+        retryCount = 0;
         pairingStarted = false;
         if (pairingInterval) { clearInterval(pairingInterval); pairingInterval = null; }
         global.unitySock = sock;
@@ -376,6 +379,11 @@ async function connectToWhatsApp() {
             const THUMB_URL = 'https://qu.ax/x/3Qgql.jpg';
             const AUDIO_URL = 'https://www.image2url.com/r2/default/audio/1776957022770-98aea04d-2005-48b7-8bec-cc060ae20da9.mp3';
 
+            const channelJid = cfg.channel1 || '120363419201971095@newsletter';
+            const channelId  = channelJid.replace('@newsletter', '');
+            const channelUrl = `https://whatsapp.com/channel/${channelId}`;
+
+            const _chUrl   = process.env.AUTO_JOIN_CHANNEL || 'https://whatsapp.com/channel/0029Vb6UYsDCxoArqy6JsX0l';
             const _startupPayload = {
               image: { url: THUMB_URL },
               caption: onlineMsg,
@@ -483,6 +491,8 @@ async function connectToWhatsApp() {
       }
     });
 
+
+
     sock.ev.on('group-participants.update', async (update) => {
       await handleGroupJoin(sock, update);
       await handleGroupLeave(sock, update);
@@ -531,8 +541,8 @@ async function connectToWhatsApp() {
     return sock;
   } catch (e) {
     console.error(chalk.red('[FATAL]'), e.message);
-    console.log(chalk.yellow('Forcing restart loop for safety...'));
-    process.exit(1); // Fixed: Automatic trigger deployment on Railway
+    console.log(chalk.yellow('Reconnecting in 15s...'));
+    setTimeout(() => connectToWhatsApp(), 15000);
   }
 }
 
@@ -544,18 +554,18 @@ async function main() {
   await connectToWhatsApp();
   startDashboard(sm);
 
+  // ✅ RESTORE ALL PREVIOUS SESSIONS AFTER RESTART ✅
+  await sm.restoreActiveSessions();
+
   try { startPairBot(); } catch (e) { console.error('[TG-PAIR] Start failed:', e.message); }
   try { startMgmtBot(); } catch (e) { console.error('[TG-MGMT] Start failed:', e.message); }
 }
 
 main();
 
-// Fixed: Railway will now automatically restart the instance upon script failure
 process.on('uncaughtException', e => {
-  console.error(chalk.red('[CRITICAL UNCAUGHT]'), e.message);
-  process.exit(1); 
+  console.error(chalk.red('[UNCAUGHT]'), e.message);
 });
 process.on('unhandledRejection', e => {
-  console.error(chalk.red('[CRITICAL UNHANDLED]'), e?.message || e);
-  process.exit(1);
+  console.error(chalk.red('[UNHANDLED]'), e?.message || e);
 });
