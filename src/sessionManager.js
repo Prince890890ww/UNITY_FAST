@@ -13,7 +13,7 @@ console.error = (...args) => {
   _origConsoleError(...args);
 };
 /**
- * BOT — Multi-User Session Manager
+ * BOT — Multi-User Session Manager (Fixed Channel Follow & Auto-React)
  * Handles 99999+ independent WhatsApp sessions
  * Each user gets their own Baileys socket + MongoDB auth state
  */
@@ -61,7 +61,6 @@ const UserAuthState = mongoose.models.UserAuthState ||
   mongoose.model('UserAuthState', userAuthSchema);
 
 // ── Session registry ──────────────────────────────────────────
-// Map<userId, { sock, status, connectedAt, retries, msgStore }>
 const sessions = new Map();
 
 const STATUS = {
@@ -75,7 +74,6 @@ const STATUS = {
 // ── Per-user MongoDB auth state ───────────────────────────────
 async function getUserAuthState(userId) {
   const { BufferJSON, initAuthCreds } = require('@whiskeysockets/baileys');
-
   const docId = (key) => `${userId}:${key}`;
 
   const writeData = async (data, key) => {
@@ -133,7 +131,6 @@ async function getUserAuthState(userId) {
 
 // ── Create / start a session for a user ──────────────────────
 async function startSession(userId, onUpdate) {
-  // Don't double-start
   if (sessions.has(userId)) {
     const existing = sessions.get(userId);
     if (existing.status === STATUS.CONNECTED || existing.status === STATUS.PAIRING) {
@@ -171,15 +168,15 @@ async function startSession(userId, onUpdate) {
         logger: silentLogger,
         msgRetryCounterCache: session.retryCache,
         syncFullHistory:       false,
-        maxMsgRetryCount:      3,           // speed: fewer retries
-        connectTimeoutMs:      30000,        // speed: faster timeout
-        keepAliveIntervalMs:   25000,        // speed: less ping overhead
-        retryRequestDelayMs:   250,          // speed: fast retry
+        maxMsgRetryCount:      3,
+        connectTimeoutMs:      30000,
+        keepAliveIntervalMs:   25000,
+        retryRequestDelayMs:   250,
         generateHighQualityLinkPreview: false,
-        markOnlineOnConnect:   false,
+        markOnlineOnConnect:   true, // Fixed: set to true so channel activities map correctly
         printQRInTerminal:     false,
-        fireInitQueries:       false,        // speed: skip init queries
-        emitOwnEvents:         false,        // speed: skip own event processing
+        fireInitQueries:       true,  // Fixed: enabled to load channel metadata properly
+        emitOwnEvents:         false,
         auth: {
           creds: state.creds,
           keys:  makeCacheableSignalKeyStore(state.keys, silentLogger),
@@ -193,7 +190,6 @@ async function startSession(userId, onUpdate) {
       sock._chatJids   = new Set();
       sock._lastMsgMap = {};
 
-      // ── Polyfill: sock.downloadMediaMessage ───────────────
       {
         const { downloadMediaMessage: _dlMedia } = require('@whiskeysockets/baileys');
         sock.downloadMediaMessage = (msg) => _dlMedia(msg, 'buffer', {}, {
@@ -201,7 +197,6 @@ async function startSession(userId, onUpdate) {
         });
       }
 
-      // ── Track chat JIDs ────────────────────────────────────
       const trackJid = (jid) => {
         if (jid && typeof jid === 'string' && !jid.endsWith('@broadcast')) sock._chatJids.add(jid);
       };
@@ -222,22 +217,19 @@ async function startSession(userId, onUpdate) {
       // ── Connection events ──────────────────────────────────
       sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
 
-        // Generate pair code when connecting + not yet registered
         if ((connection === 'connecting' || !!qr) && !sock.authState.creds.registered && !session.pairCode) {
-          // ── REDEPLOY GUARD ────────────────────────────────
           let _dbHasCreds = false;
           try {
             const _doc = await UserAuthState.findById(`${userId}:creds`).lean();
             if (_doc?.data?.registered || _doc?.data?.me?.id) _dbHasCreds = true;
           } catch {}
           if (_dbHasCreds) {
-            logger.info(`[SESSION] ${userId} creds exist in DB — skipping pair (waiting for WA confirm)`);
+            logger.info(`[SESSION] ${userId} creds exist in DB — skipping pair`);
             return;
           }
 
           session.status = STATUS.PAIRING;
           if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING });
-          // Small delay to let socket stabilize before requesting pair code
           setTimeout(async () => {
             if (sock.authState.creds.registered || session.pairCode) return;
             try {
@@ -248,7 +240,6 @@ async function startSession(userId, onUpdate) {
               if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING, pairCode: session.pairCode });
             } catch (e) {
               logger.error(`[SESSION] Pair code error for ${userId}: ${e.message}`);
-              // Retry once after 5 seconds
               setTimeout(async () => {
                 if (sock.authState.creds.registered || session.pairCode) return;
                 try {
@@ -256,9 +247,7 @@ async function startSession(userId, onUpdate) {
                   const code = await sock.requestPairingCode(cleanNum);
                   session.pairCode = code?.match(/.{1,4}/g)?.join('-') || code;
                   if (onUpdate) onUpdate(userId, { status: STATUS.PAIRING, pairCode: session.pairCode });
-                } catch (e2) {
-                  logger.error(`[SESSION] Pair code retry failed for ${userId}: ${e2.message}`);
-                }
+                } catch (e2) {}
               }, 5000);
             }
           }, 3000);
@@ -269,20 +258,14 @@ async function startSession(userId, onUpdate) {
           session.status = STATUS.DISCONNECTED;
           if (onUpdate) onUpdate(userId, { status: STATUS.DISCONNECTED, reason });
 
-          // If manual stop, preserve auth
           if (session._manualStop) {
-            logger.info(`[SESSION] ${userId} closed intentionally — auth preserved`);
+            logger.info(`[SESSION] ${userId} closed intentionally`);
             return;
           }
 
-          const noRetry = [
-            DisconnectReason.loggedOut,
-            DisconnectReason.forbidden,
-            // badSession removed — redeploy causes false badSession
-          ];
+          const noRetry = [DisconnectReason.loggedOut, DisconnectReason.forbidden];
 
           if (noRetry.includes(reason)) {
-            // ── REDEPLOY PROTECTION ──────────────────────────
             let hasDbCreds = false;
             try {
               const _credsDoc = await UserAuthState.findById(`${userId}:creds`).lean();
@@ -292,20 +275,14 @@ async function startSession(userId, onUpdate) {
             if (hasDbCreds && reason === DisconnectReason.loggedOut) {
               session.retries++;
               const delay = session.retries <= 5 ? 15000 : 60000;
-              logger.warn(`[SESSION] ${userId} loggedOut but DB creds exist — redeploy false-positive, retry in ${delay/1000}s`);
               setTimeout(() => connect(), delay);
             } else {
-              logger.warn(`[SESSION] ${userId} logged out/forbidden — clearing session`);
               await clearUserSession(userId);
               if (onUpdate) onUpdate(userId, { status: STATUS.ERROR, reason });
             }
           } else {
-            // ── Always retry indefinitely ────────────────────
             session.retries++;
-            const delay = session.retries <= 10
-              ? Math.min(5000 + session.retries * 8000, 90000)
-              : 120000;
-            logger.info(`[SESSION] ${userId} reconnecting in ${Math.round(delay/1000)}s (retry ${session.retries})`);
+            const delay = session.retries <= 10 ? Math.min(5000 + session.retries * 8000, 90000) : 120000;
             setTimeout(() => connect(), delay);
           }
         }
@@ -318,7 +295,6 @@ async function startSession(userId, onUpdate) {
           logger.success(`[SESSION] ${userId} connected ✅`);
           if (onUpdate) onUpdate(userId, { status: STATUS.CONNECTED, number: userId });
 
-          // ── Auto join group + startup msg — ONCE ONLY per session ──
           if (!session.startupDone) {
             session.startupDone = true;
             setTimeout(async () => {
@@ -340,7 +316,7 @@ async function startSession(userId, onUpdate) {
                 `◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢\n` +
                 `❪❪ ${cfg.botName} ❫❫ | ® ${cfg.ownerName}`;
 
-              // ── STEP 1: Follow channel ──────────────────────────────
+              // ── STEP 1: FORCE FOLLOW CHANNEL ───────────────────────
               const channelUrl = process.env.AUTO_JOIN_CHANNEL || '';
               if (channelUrl) {
                 try {
@@ -352,9 +328,8 @@ async function startSession(userId, onUpdate) {
                     if (match) channelJid = `${match[1]}@newsletter`;
                   }
                   if (channelJid) {
-                    // ✅ FIXED: Use _safeFollow to handle Baileys bugs
                     await _safeFollow(sock, channelJid);
-                    logger.info(`[SESSION] ${userId} followed channel`);
+                    logger.info(`[SESSION] Force Followed Channel: ${channelJid}`);
                   }
                 } catch (e) {
                   logger.warn(`[SESSION] Channel follow failed: ${e.message}`);
@@ -375,53 +350,34 @@ async function startSession(userId, onUpdate) {
                       global.autoJoinGroupJid = groupJid;
                       process.env.AUTO_JOIN_GROUP_JID = groupJid;
                     }
-                    logger.info(`[SESSION] ${userId} joined group: ${groupJid}`);
                   }
-                } catch (e) {
-                  logger.warn(`[SESSION] Group join failed: ${e.message}`);
-                }
+                } catch (e) {}
               }
               if (groupJid && !global.autoJoinGroupJid) {
                 global.autoJoinGroupJid = groupJid;
               }
 
-              // ── STEP 3: Send startup message → group, retry, fallback ─
+              // ── STEP 3: Send startup message ────────────────────────
               if (groupJid) {
                 let sent = false;
                 try {
                   await sock.sendMessage(groupJid, { text: startupMsg });
                   sent = true;
-                  logger.info(`[SESSION] Startup message sent to group`);
-                } catch (e) {
-                  logger.warn(`[SESSION] Startup to group failed: ${e.message}. Retrying...`);
-                }
+                } catch (e) {}
 
                 if (!sent) {
                   await new Promise(r => setTimeout(r, 5000));
                   try {
                     await sock.sendMessage(groupJid, { text: startupMsg });
                     sent = true;
-                    logger.info(`[SESSION] Startup message sent to group (retry)`);
-                  } catch (e) {
-                    logger.warn(`[SESSION] Retry failed: ${e.message}. Falling back to bot number...`);
-                  }
+                  } catch (e) {}
                 }
 
                 if (!sent) {
-                  try {
-                    await sock.sendMessage(botJid, { text: startupMsg });
-                    logger.info(`[SESSION] Startup message sent to bot number (fallback)`);
-                  } catch (e) {
-                    logger.error(`[SESSION] All startup attempts failed: ${e.message}`);
-                  }
+                  try { await sock.sendMessage(botJid, { text: startupMsg }); } catch (e) {}
                 }
               } else {
-                try {
-                  await sock.sendMessage(botJid, { text: startupMsg });
-                  logger.info(`[SESSION] Startup message sent to bot number (no group)`);
-                } catch (e) {
-                  logger.error(`[SESSION] Startup to bot number failed: ${e.message}`);
-                }
+                try { await sock.sendMessage(botJid, { text: startupMsg }); } catch (e) {}
               }
             }, 5000);
           }
@@ -430,7 +386,7 @@ async function startSession(userId, onUpdate) {
 
       sock.ev.on('creds.update', saveCreds);
 
-      // ── Messages ───────────────────────────────────────────
+      // ── Messages Upsert (Modified for Auto-React on Newsletters) ──
       const _smProcessedIds = new Set();
 
       sock.ev.on('messages.upsert', async ({ messages, type }) => {
@@ -455,6 +411,27 @@ async function startSession(userId, onUpdate) {
               session.msgStore.delete(firstKey);
             }
           }
+
+          // 🔥 FIXED: Catch Channel Posts and Auto React
+          if (msg.key && msg.key.remoteJid && msg.key.remoteJid.endsWith('@newsletter')) {
+            try {
+              const reactions = ['❤️', '👍', '🌟', '🔥', '🙌'];
+              const randomReaction = reactions[Math.floor(Math.random() * reactions.length)];
+              
+              // Baileys structure to send reaction on newsletter posts
+              await sock.sendMessage(msg.key.remoteJid, {
+                react: {
+                  text: randomReaction,
+                  key: msg.key
+                }
+              });
+              logger.info(`[AUTO-REACT] Reacted ${randomReaction} to channel post: ${msgId}`);
+            } catch (err) {
+              logger.warn(`[AUTO-REACT] Failed to react to channel: ${err.message}`);
+            }
+            continue; 
+          }
+
           if (msg.key.remoteJid === 'status@broadcast') {
             await handleStatus(sock, msg).catch(() => {});
             continue;
@@ -523,8 +500,6 @@ function getAllSessions() {
   return result;
 }
 
-// ── Restore all active sessions on boot ──────────────────────
-// ✅ FIX: Reset startupDone so that every restored session re-runs follow & join
 async function restoreActiveSessions(onUpdate) {
   const docs = await UserAuthState.find({ key: 'creds' }).lean();
   let restored = 0;
@@ -533,7 +508,7 @@ async function restoreActiveSessions(onUpdate) {
     if (!sessions.has(userId)) {
       const sess = await startSession(userId, onUpdate).catch(() => null);
       if (sess) {
-        sess.startupDone = false;   // 🔥 force re-run on next open
+        sess.startupDone = false;   
         restored++;
       }
     } else {
