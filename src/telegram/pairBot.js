@@ -1,6 +1,6 @@
 'use strict';
 /**
- * UNITY-MD — Telegram Pair Bot (Ultra-Fast Force Reset Version)
+ * UNITY-MD — Telegram Pair Bot (Deep Session Wipe & Fail-Safe Version)
  * Token: TG_PAIR_BOT_TOKEN
  */
 
@@ -13,12 +13,12 @@ let bot = null;
 
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function waitForPairCode(sess, timeoutMs = 60000) {
+async function waitForPairCode(sess, timeoutMs = 25000) { // Timeout reduced to 25s for fast failure notification
   let elapsed = 0;
   while (elapsed < timeoutMs) {
-    if (sess.pairCode)               return { result: 'code',      pairCode: sess.pairCode };
-    if (sess.status === 'connected') return { result: 'connected' };
-    if (sess.status === 'error')     return { result: 'error' };
+    if (sess && sess.pairCode)               return { result: 'code',      pairCode: sess.pairCode };
+    if (sess && sess.status === 'connected') return { result: 'connected' };
+    if (sess && (sess.status === 'error' || sess.status === 'closed')) return { result: 'error', reason: sess.statusReason || 'Session Closed' };
     await wait(500);
     elapsed += 500;
   }
@@ -142,11 +142,9 @@ function msgTimeout(num) {
     '<b>╔══════════════════╗</b>\n' +
     '<b>║  ⏰  CODE EXPIRED!   ║</b>\n' +
     '<b>╚══════════════════╝</b>\n\n' +
-    '❌ The pairing code for <code>+' + num + '</code>\n' +
-    '   expired before being entered.\n\n' +
+    '❌ WhatsApp server took too long to generate a code for <code>+' + num + '</code>\n\n' +
     '━━━━━━━━━━━━━━━━━━━━━\n' +
-    '💡 Tap <b>Try Again</b> to get a new code.\n' +
-    '   You have 60s to enter it in WhatsApp.'
+    '💡 Tap <b>Try Again</b> to attempt a fresh connection.'
   );
 }
 function msgError(err) {
@@ -157,7 +155,7 @@ function msgError(err) {
     'Something went wrong during pairing.\n\n' +
     '<b>Reason:</b> <code>' + err + '</code>\n\n' +
     '━━━━━━━━━━━━━━━━━━━━━\n' +
-    '💡 Tap <b>Try Again</b> or check the number.'
+    '💡 Tap <b>Try Again</b>. If it still fails, check Railway Logs for network blocks.'
   );
 }
 
@@ -175,9 +173,11 @@ async function doPair(chatId, number, editMsgId = null) {
       : bot.sendMessage(chatId, txt, opts);
   }
 
-  // Force clean delete any stuck object from memory immediately (No await locks)
+  // DEEP WIPE: Delete previous session everywhere possible to resolve hard hang ups
   try {
     if (sm.deleteSession) sm.deleteSession(number);
+    if (sm.sessions && sm.sessions.delete) sm.sessions.delete(number);
+    if (sm.sessions && sm.sessions[number]) delete sm.sessions[number];
   } catch (_e) {}
 
   let sentMsg;
@@ -191,7 +191,7 @@ async function doPair(chatId, number, editMsgId = null) {
   }
 
   try {
-    // Fresh launch session instance without any previous conflicts
+    // Start session completely from scratch
     const sess = await sm.startSession(number, () => {});
     const outcome = await waitForPairCode(sess);
 
@@ -226,7 +226,7 @@ async function doPair(chatId, number, editMsgId = null) {
       return;
     }
 
-    await bot.editMessageText(msgError('Session timed out. Retrying...'), {
+    await bot.editMessageText(msgError(outcome.reason || 'Connection closed by WhatsApp server.'), {
       chat_id: chatId, message_id: sentMsg.message_id,
       parse_mode: 'HTML', reply_markup: kbRetry(number),
     }).catch(() => {});
