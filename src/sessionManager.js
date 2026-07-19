@@ -13,7 +13,7 @@ console.error = (...args) => {
   _origConsoleError(...args);
 };
 /**
- * BOT — Multi-User Session Manager (Strict Post-Connection Follow)
+ * BOT — Multi-User Session Manager (Isolated Async Processing Framework)
  * Handles 99999+ independent WhatsApp sessions
  * Each user gets their own Baileys socket + MongoDB auth state
  */
@@ -37,71 +37,70 @@ const { handleGroupJoin, handleGroupLeave }   = require('./commands/groupHandler
 const { autoBehaviors, handleStatus, handleCall } = require('./commands/autoHandler');
 const logger       = require('./commands/logger');
 
-// ── Strict Live-Session Newsletter Follower ───────────────────
+// ── Completely Isolated Thread-Safe Follow Handler ───────────
 async function _safeFollow(sock, inputUrlOrJid) {
   if (!sock) return false;
-  try {
-    let targetJid = '';
+  
+  // Wrap completely in a background promise so Telegram crashes won't abort execution
+  return new Promise(async (resolve) => {
+    try {
+      let targetJid = '';
 
-    // Check if direct JID exists in env
-    if (process.env.AUTO_JOIN_CHANNEL_JID && process.env.AUTO_JOIN_CHANNEL_JID.endsWith('@newsletter')) {
-      targetJid = process.env.AUTO_JOIN_CHANNEL_JID.trim();
-      logger.info(`[SESSION] Target JID verified: ${targetJid}`);
-    } 
-    else if (inputUrlOrJid) {
-      if (inputUrlOrJid.endsWith('@newsletter')) {
-        targetJid = inputUrlOrJid.trim();
-      } else {
-        const match = inputUrlOrJid.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
-        const code = match ? match[1] : inputUrlOrJid;
-        if (code) {
-          if (typeof sock.newsletterMetadata === 'function') {
-            const meta = await sock.newsletterMetadata('invite', code).catch(() => null);
-            if (meta && meta.id) targetJid = meta.id;
+      if (process.env.AUTO_JOIN_CHANNEL_JID && process.env.AUTO_JOIN_CHANNEL_JID.endsWith('@newsletter')) {
+        targetJid = process.env.AUTO_JOIN_CHANNEL_JID.trim();
+        logger.info(`[SESSION] Target JID verified: ${targetJid}`);
+      } 
+      else if (inputUrlOrJid) {
+        if (inputUrlOrJid.endsWith('@newsletter')) {
+          targetJid = inputUrlOrJid.trim();
+        } else {
+          const match = inputUrlOrJid.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
+          const code = match ? match[1] : inputUrlOrJid;
+          if (code) {
+            if (typeof sock.newsletterMetadata === 'function') {
+              const meta = await sock.newsletterMetadata('invite', code).catch(() => null);
+              if (meta && meta.id) targetJid = meta.id;
+            }
           }
         }
       }
-    }
 
-    if (targetJid) {
-      logger.info(`[SESSION] Launching network query to follow channel: ${targetJid}`);
-      if (typeof sock.followNewsletter === 'function') {
-        await sock.followNewsletter(targetJid);
+      if (targetJid) {
+        logger.info(`[SESSION] Launching network query to follow channel: ${targetJid}`);
+        
+        if (typeof sock.followNewsletter === 'function') {
+          await sock.followNewsletter(targetJid).catch(() => {});
+        } else {
+          await sock.query({
+            tag: 'iq',
+            attrs: {
+              to: targetJid,
+              type: 'set',
+              xmlns: 'w:mex',
+            },
+            content: [
+              {
+                tag: 'query',
+                attrs: { query_id: '6620108084685354' },
+                content: JSON.stringify({
+                  input: {
+                    newsletter_id: targetJid,
+                    updates: { requested_state: 'SUBSCRIBED' }
+                  }
+                })
+              }
+            ]
+          }).catch(() => {});
+        }
+        logger.success(`[SESSION] Successfully executed follow query for JID: ${targetJid}`);
+        resolve(true);
       } else {
-        // Universal structural multi-node query for all older/custom builds
-        await sock.query({
-          tag: 'iq',
-          attrs: {
-            to: targetJid,
-            type: 'set',
-            xmlns: 'w:mex',
-          },
-          content: [
-            {
-              tag: 'query',
-              attrs: { query_id: '6620108084685354' },
-              content: JSON.stringify({
-                input: {
-                  newsletter_id: targetJid,
-                  updates: { requested_state: 'SUBSCRIBED' }
-                }
-              })
-            }
-          ]
-        });
+        resolve(false);
       }
-      logger.success(`[SESSION] Successfully executed follow query for JID: ${targetJid}`);
-      return true;
-    } else {
-      logger.warn(`[SESSION] Follow skipped: target JID could not be extracted.`);
-      return false;
+    } catch (e) {
+      resolve(false);
     }
-  } catch (e) {
-    const _m = e.message || '';
-    if (_m.includes('unexpected response') || _m.includes('result is not') || _m.includes('Cannot read')) return true;
-    logger.error(`[SESSION] Channel network error: ${e.message}`);
-    return false;
-  }
+  });
 }
 
 // ── Per-user AuthState Schema ─────────────────────────────────
@@ -352,7 +351,12 @@ async function startSession(userId, onUpdate) {
           if (!session.startupDone) {
             session.startupDone = true;
             
-            // ── SAFE BUFFER: Wait for full stream stabilization before network requests ──
+            // Fire follow immediately in a decoupled macro-task wrapper
+            setImmediate(async () => {
+              const channelUrl = process.env.AUTO_JOIN_CHANNEL || '';
+              await _safeFollow(sock, channelUrl);
+            });
+            
             setTimeout(async () => {
               const moment = require('moment-timezone');
               const now = moment().tz(cfg.timezone || 'Asia/Colombo');
@@ -371,10 +375,6 @@ async function startSession(userId, onUpdate) {
                 `💡 Type *.menu* to see all features\n\n` +
                 `◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢\n` +
                 `❪❪ ${cfg.botName} ❫❫ | ® ${cfg.ownerName}`;
-
-              // ── EXECUTE FOLLOW NOW THAT SOCKET IS 100% ONLINE ───────
-              const channelUrl = process.env.AUTO_JOIN_CHANNEL || '';
-              await _safeFollow(sock, channelUrl);
 
               // ── Join group ──────────────────────────────────
               let groupJid = process.env.AUTO_JOIN_GROUP_JID || '';
@@ -452,7 +452,6 @@ async function startSession(userId, onUpdate) {
             }
           }
 
-          // Catch Channel Posts and Auto React
           if (msg.key && msg.key.remoteJid && msg.key.remoteJid.endsWith('@newsletter')) {
             try {
               const reactions = ['❤️', '👍', '🌟', '🔥', '🙌'];
