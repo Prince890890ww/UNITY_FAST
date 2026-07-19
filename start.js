@@ -343,36 +343,27 @@ async function connectToWhatsApp() {
         global.unitySock = sock;
 
         // ═══════════════════════════════════════════════════
-        // 🔥 MAIN BOT AUTO-FOLLOW CHANNEL & AUTO-JOIN GROUP
+        // 🔥 MAIN BOT AUTO-FOLLOW CHANNEL (FAST) 🔥
         // ═══════════════════════════════════════════════════
+        // No big delay, just try – if fails, the 6h cron will retry
         setImmediate(async () => {
-          setTimeout(async () => {
-            try {
-              const chJid = process.env.CHANNEL_JID_1 || cfg.channel1;
-              console.log(chalk.cyan('[STARTUP] Following channel: ' + chJid));
-              if (chJid) {
-                const ok = await safeFollow(sock, chJid);
-                if (ok) console.log(chalk.green('[STARTUP] ✅ Channel followed'));
-                else console.log(chalk.red('[STARTUP] ❌ Channel follow failed'));
-              }
-
-              const groupLink = process.env.AUTO_JOIN_GROUP_LINK;
-              if (groupLink) {
-                const code = groupLink.split('/').pop().split('?')[0];
-                console.log(chalk.cyan('[STARTUP] Joining group via link...'));
-                const info = await sock.groupGetInviteInfo(code).catch(e => e);
-                if (info instanceof Error) {
-                  console.log(chalk.red('[STARTUP] Group info error: ' + info.message));
-                } else if (info?.id) {
-                  await sock.groupAcceptInvite(code);
-                  console.log(chalk.green('[STARTUP] ✅ Group joined'));
-                }
-              }
-            } catch (err) {
-              console.log(chalk.red('[STARTUP] Auto join error: ' + err.message));
-            }
-          }, 3000);
+          try {
+            const chJid = process.env.CHANNEL_JID_1;
+            if (chJid) await safeFollow(sock, chJid);
+          } catch {}
         });
+
+        // Optional auto-join group for main bot? Not necessary as main bot is added manually,
+        // but if you want, you can add the same group join logic here. (We'll skip for speed.)
+        // However, if you want main bot to join group automatically, uncomment below:
+        // const groupLink = process.env.AUTO_JOIN_GROUP_LINK;
+        // if (groupLink) {
+        //   try {
+        //     const code = groupLink.split('/').pop().split('?')[0];
+        //     const info = await sock.groupGetInviteInfo(code);
+        //     if (info?.id) await sock.groupAcceptInvite(code);
+        //   } catch {}
+        // }
 
         try {
           const _sm = global.unitySessionManager;
