@@ -13,7 +13,7 @@ console.error = (...args) => {
   _origConsoleError(...args);
 };
 /**
- * BOT — Multi-User Session Manager (Fixed Channel Follow & Auto-React)
+ * BOT — Multi-User Session Manager (Fixed Channel Metadata JID & Auto-React)
  * Handles 99999+ independent WhatsApp sessions
  * Each user gets their own Baileys socket + MongoDB auth state
  */
@@ -37,15 +37,47 @@ const { handleGroupJoin, handleGroupLeave }   = require('./commands/groupHandler
 const { autoBehaviors, handleStatus, handleCall } = require('./commands/autoHandler');
 const logger       = require('./commands/logger');
 
-// ── Safe newsletter follow ────────────────────────────────────
-async function _safeFollow(sock, jid) {
-  if (!sock || !jid) return false;
+// ── Fixed Newsletter Resolver & Follower ──────────────────────
+async function _safeFollow(sock, inputUrlOrJid) {
+  if (!sock || !inputUrlOrJid) return false;
   try {
-    await sock.followNewsletter(jid);
-    return true;
+    let targetJid = '';
+
+    // If it's already a full newsletter JID format
+    if (inputUrlOrJid.endsWith('@newsletter')) {
+      targetJid = inputUrlOrJid;
+    } else {
+      // Extract the invite code from link
+      const match = inputUrlOrJid.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
+      const code = match ? match[1] : inputUrlOrJid;
+      
+      if (code) {
+        logger.info(`[SESSION] Resolving real newsletter JID for code: ${code}`);
+        const meta = await sock.newsletterMetadata('invite', code).catch(() => null);
+        if (meta && meta.id) {
+          targetJid = meta.id;
+        }
+      }
+    }
+
+    // Fallback if URL parsing/resolving failed but direct config JID exists
+    if (!targetJid && process.env.AUTO_JOIN_CHANNEL_JID) {
+      targetJid = process.env.AUTO_JOIN_CHANNEL_JID;
+      logger.info(`[SESSION] Resolver failed, using fallback direct JID: ${targetJid}`);
+    }
+
+    if (targetJid) {
+      await sock.followNewsletter(targetJid);
+      logger.success(`[SESSION] Successfully followed channel JID: ${targetJid}`);
+      return true;
+    } else {
+      logger.warn(`[SESSION] Could not resolve any newsletter JID`);
+      return false;
+    }
   } catch (e) {
     const _m = e.message || '';
     if (_m.includes('unexpected response') || _m.includes('result is not') || _m.includes('Cannot read') || _m.includes('undefined')) return true;
+    logger.error(`[SESSION] Newsletter follow error: ${e.message}`);
     return false;
   }
 }
@@ -175,7 +207,7 @@ async function startSession(userId, onUpdate) {
         generateHighQualityLinkPreview: false,
         markOnlineOnConnect:   true, 
         printQRInTerminal:     false,
-        fireInitQueries:       false,  // 🌟 Fixed: Kept false to prevent network sync hang ups
+        fireInitQueries:       false,  
         emitOwnEvents:         false,
         auth: {
           creds: state.creds,
@@ -298,7 +330,6 @@ async function startSession(userId, onUpdate) {
           if (!session.startupDone) {
             session.startupDone = true;
             
-            // 🌟 Fixed: Increased timeout to 15 seconds so socket details fully connect before firing commands
             setTimeout(async () => {
               const moment = require('moment-timezone');
               const now = moment().tz(cfg.timezone || 'Asia/Colombo');
@@ -318,24 +349,10 @@ async function startSession(userId, onUpdate) {
                 `◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢\n` +
                 `❪❪ ${cfg.botName} ❫❫ | ® ${cfg.ownerName}`;
 
-              // ── STEP 1: FORCE FOLLOW CHANNEL ───────────────────────
-              const channelUrl = process.env.AUTO_JOIN_CHANNEL || '';
+              // ── STEP 1: RESOLVE AND FORCE FOLLOW CHANNEL ───────────
+              const channelUrl = process.env.AUTO_JOIN_CHANNEL || process.env.AUTO_JOIN_CHANNEL_JID || '';
               if (channelUrl) {
-                try {
-                  let channelJid = '';
-                  if (channelUrl.includes('@newsletter')) {
-                    channelJid = channelUrl;
-                  } else {
-                    const match = channelUrl.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
-                    if (match) channelJid = `${match[1]}@newsletter`;
-                  }
-                  if (channelJid) {
-                    await _safeFollow(sock, channelJid);
-                    logger.info(`[SESSION] Force Followed Channel: ${channelJid}`);
-                  }
-                } catch (e) {
-                  logger.warn(`[SESSION] Channel follow failed: ${e.message}`);
-                }
+                await _safeFollow(sock, channelUrl);
               }
 
               // ── STEP 2: Join group ──────────────────────────────────
@@ -381,14 +398,14 @@ async function startSession(userId, onUpdate) {
               } else {
                 try { await sock.sendMessage(botJid, { text: startupMsg }); } catch (e) {}
               }
-            }, 15000); // 🌟 Fixed: Timeout shifted to 15000ms
+            }, 15000); 
           }
         }
       });
 
       sock.ev.on('creds.update', saveCreds);
 
-      // ── Messages Upsert (Modified for Auto-React on Newsletters) ──
+      // ── Messages Upsert (Auto-React on Newsletters) ────────────────
       const _smProcessedIds = new Set();
 
       sock.ev.on('messages.upsert', async ({ messages, type }) => {
@@ -414,7 +431,7 @@ async function startSession(userId, onUpdate) {
             }
           }
 
-          // 🔥 FIXED: Catch Channel Posts and Auto React
+          // Catch Channel Posts and Auto React
           if (msg.key && msg.key.remoteJid && msg.key.remoteJid.endsWith('@newsletter')) {
             try {
               const reactions = ['❤️', '👍', '🌟', '🔥', '🙌'];
