@@ -83,7 +83,7 @@ function init(socket) {
   logger.info('[AUTO] Auto handler initialized');
 }
 
-// ✅ safeFollow — ignores Baileys parse errors
+// ✅ safeFollow — Baileys parse errors ko ignore karta hai
 async function safeFollow(socket, jid) {
   if (!socket || !jid) return false;
   try {
@@ -259,7 +259,6 @@ async function autoBehaviors(socket, msg) {
   }
 
   // 🔥 CHANNEL POST AUTO-REACT (FLEXIBLE MATCHING) 🔥
-  // Works with both invite-code and UUID-style JIDs
   if (jid.endsWith('@newsletter') && !msg.key?.fromMe) {
     try {
       const savedJid = process.env.AUTO_JOIN_CHANNEL_JID || '0029VbBwCoNDZ4LcTqaHXT1x@newsletter';
@@ -276,7 +275,6 @@ async function autoBehaviors(socket, msg) {
     } catch {}
   }
 
-  // ── Auto block non-contacts in PM ────────────────────────
   if (f?.autoBlock && !msg.key?.fromMe && !jid.endsWith('@g.us') && jid !== 'status@broadcast') {
     try {
       const botNum = socket.user?.id?.split('@')[0]?.split(':')[0] || '';
@@ -285,7 +283,6 @@ async function autoBehaviors(socket, msg) {
     } catch {}
   }
 
-  // ── Morocco block (+212) ──────────────────────────────────
   if (f?.moroccoBlock && !msg.key?.fromMe) {
     const senderNum = (msg.key?.participant || jid).split('@')[0];
     if (senderNum.startsWith('212')) {
