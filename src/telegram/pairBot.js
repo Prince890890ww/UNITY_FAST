@@ -1,6 +1,6 @@
 'use strict';
 /**
- * UNITY-MD — Telegram Pair Bot
+ * UNITY-MD — Telegram Pair Bot (Optimized: No OTP Limit & Auto-Reset)
  * Token: TG_PAIR_BOT_TOKEN
  */
 
@@ -11,7 +11,7 @@ const logger      = require('../commands/logger');
 
 let bot = null;
 
-const _inProgress = new Set();
+// Fixed: In-progress tracker completely removed to allow non-stop spam/requests without rate limits
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function waitForPairCode(sess, timeoutMs = 60000) {
@@ -59,7 +59,7 @@ function msgStart(name) {
     '   the <b>UNITY-MD</b> bot in seconds.\n\n' +
     '📌 All you need is your\n' +
     '   WhatsApp number with country code.\n' +
-    '━━━━━━━━━━━━━━━━━━━━━\n\n' +
+    '━━━━━━━━━━━━━━━━━━━━━\n' +
     '<i>Tap a button below to get started 👇</i>'
   );
 }
@@ -165,24 +165,9 @@ function msgError(err) {
     '💡 Tap <b>Try Again</b> or wait 60s.'
   );
 }
-function msgInProgress(num) {
-  return (
-    '<b>⏳ Already Processing...</b>\n\n' +
-    'A pairing request for <code>+' + num + '</code>\n' +
-    'is currently in progress.\n\n' +
-    'Please wait for it to complete.'
-  );
-}
 
 // ── Core pair flow ────────────────────────────────────────────
 async function doPair(chatId, number, editMsgId = null) {
-  if (_inProgress.has(number)) {
-    const opts = { parse_mode: 'HTML' };
-    return editMsgId
-      ? bot.editMessageText(msgInProgress(number), { chat_id: chatId, message_id: editMsgId, ...opts }).catch(() => {})
-      : bot.sendMessage(chatId, msgInProgress(number), opts);
-  }
-
   let sm = global.unitySessionManager;
   if (!sm) {
     try { sm = require('../sessionManager'); global.unitySessionManager = sm; } catch (_e) {}
@@ -195,6 +180,7 @@ async function doPair(chatId, number, editMsgId = null) {
       : bot.sendMessage(chatId, txt, opts);
   }
 
+  // Check if number is genuinely connected
   const existing = sm.getSession(number);
   if (existing?.status === 'connected') {
     const opts = { parse_mode: 'HTML', reply_markup: KB_HOME };
@@ -203,7 +189,16 @@ async function doPair(chatId, number, editMsgId = null) {
       : bot.sendMessage(chatId, msgConnected(number), opts);
   }
 
-  _inProgress.add(number);
+  // Fixed: Force fully kill/wipe previous unresolved stale sessions for this number to prevent infinite "Generating..." state
+  if (existing) {
+    try {
+      if (typeof existing.logout === 'function') await existing.logout().catch(() => {});
+      if (typeof existing.end === 'function') await existing.end().catch(() => {});
+    } catch (_err) {}
+    try {
+      if (sm.deleteSession) sm.deleteSession(number);
+    } catch (_err) {}
+  }
 
   let sentMsg;
   if (editMsgId) {
@@ -216,6 +211,7 @@ async function doPair(chatId, number, editMsgId = null) {
   }
 
   try {
+    // Fixed: Always start a completely clear, clean session instance
     const sess    = await sm.startSession(number, () => {});
     const outcome = await waitForPairCode(sess);
 
@@ -250,7 +246,7 @@ async function doPair(chatId, number, editMsgId = null) {
       return;
     }
 
-    await bot.editMessageText(msgError('Session error'), {
+    await bot.editMessageText(msgError('Session reset request forced. Try again.'), {
       chat_id: chatId, message_id: sentMsg.message_id,
       parse_mode: 'HTML', reply_markup: kbRetry(number),
     }).catch(() => {});
@@ -261,8 +257,6 @@ async function doPair(chatId, number, editMsgId = null) {
       chat_id: chatId, message_id: sentMsg.message_id,
       parse_mode: 'HTML', reply_markup: kbRetry(number),
     }).catch(() => {});
-  } finally {
-    _inProgress.delete(number);
   }
 }
 
@@ -274,7 +268,6 @@ async function start() {
     return;
   }
 
-  // ── Clear any stuck webhook/session before polling ───────────
   try {
     const tempBot = new TelegramBot(TOKEN);
     await tempBot.deleteWebhook({ drop_pending_updates: true });
