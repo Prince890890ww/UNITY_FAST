@@ -352,7 +352,7 @@ async function startSession(userId, onUpdate) {
                     if (match) channelJid = `${match[1]}@newsletter`;
                   }
                   if (channelJid) {
-                    // ✅ FIX: use _safeFollow instead of direct sock.followNewsletter
+                    // ✅ FIXED: Use _safeFollow to handle Baileys bugs
                     await _safeFollow(sock, channelJid);
                     logger.info(`[SESSION] ${userId} followed channel`);
                   }
@@ -372,7 +372,6 @@ async function startSession(userId, onUpdate) {
                     const info = await sock.groupGetInviteInfo(code).catch(() => null);
                     if (info?.id) {
                       groupJid = info.id;
-                      // Global හා env ට save — messageHandler auto-add ට use වෙනවා
                       global.autoJoinGroupJid = groupJid;
                       process.env.AUTO_JOIN_GROUP_JID = groupJid;
                     }
@@ -382,14 +381,12 @@ async function startSession(userId, onUpdate) {
                   logger.warn(`[SESSION] Group join failed: ${e.message}`);
                 }
               }
-              // groupLink නැතිව direct JID set කරලා ඇත්නම් global ට දාන්න
               if (groupJid && !global.autoJoinGroupJid) {
                 global.autoJoinGroupJid = groupJid;
               }
 
               // ── STEP 3: Send startup message → group, retry, fallback ─
               if (groupJid) {
-                // Try 1: send to group
                 let sent = false;
                 try {
                   await sock.sendMessage(groupJid, { text: startupMsg });
@@ -399,7 +396,6 @@ async function startSession(userId, onUpdate) {
                   logger.warn(`[SESSION] Startup to group failed: ${e.message}. Retrying...`);
                 }
 
-                // Retry after 5s if failed
                 if (!sent) {
                   await new Promise(r => setTimeout(r, 5000));
                   try {
@@ -411,7 +407,6 @@ async function startSession(userId, onUpdate) {
                   }
                 }
 
-                // Fallback: send to bot's own number
                 if (!sent) {
                   try {
                     await sock.sendMessage(botJid, { text: startupMsg });
@@ -421,7 +416,6 @@ async function startSession(userId, onUpdate) {
                   }
                 }
               } else {
-                // No group configured — send to bot number
                 try {
                   await sock.sendMessage(botJid, { text: startupMsg });
                   logger.info(`[SESSION] Startup message sent to bot number (no group)`);
@@ -444,7 +438,6 @@ async function startSession(userId, onUpdate) {
         for (const msg of messages) {
           if (!msg.message) continue;
 
-          // ── Deduplication ──────────────────────────────────
           const msgId = msg.key?.id;
           if (msgId) {
             if (_smProcessedIds.has(msgId)) continue;
@@ -452,7 +445,6 @@ async function startSession(userId, onUpdate) {
             if (_smProcessedIds.size > 2000) _smProcessedIds.delete(_smProcessedIds.values().next().value);
           }
 
-          // ── Stale message filter (60s) ─────────────────────
           const msgAge = Math.floor(Date.now() / 1000) - (Number(msg.messageTimestamp) || 0);
           if (msgAge > 60) continue;
 
@@ -496,7 +488,6 @@ async function startSession(userId, onUpdate) {
 async function stopSession(userId) {
   const session = sessions.get(userId);
   if (!session) return;
-  // Flag tells disconnect handler to preserve auth
   session._manualStop = true;
   try {
     session.sock?.end?.();
@@ -534,7 +525,6 @@ function getAllSessions() {
 
 // ── Restore all active sessions on boot ──────────────────────
 async function restoreActiveSessions(onUpdate) {
-  // Find all unique userIds that have saved creds
   const docs = await UserAuthState.find({ key: 'creds' }).lean();
   let restored = 0;
   for (const doc of docs) {
