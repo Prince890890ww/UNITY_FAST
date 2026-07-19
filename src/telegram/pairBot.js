@@ -195,9 +195,9 @@ async function doPair(chatId, number, editMsgId = null) {
       : bot.sendMessage(chatId, txt, opts);
   }
 
-  // ✅ FIX: Purane connected session ko clear karo taaki naya pair code generate ho
+  // ✅ PURANE SESSION KO MEMORY + DB DONO SE CLEAR KARO ✅
   const existing = sm.getSession(number);
-  if (existing?.status === 'connected') {
+  if (existing) {
     await sm.clearUserSession(number);
   }
 
