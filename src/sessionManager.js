@@ -173,9 +173,9 @@ async function startSession(userId, onUpdate) {
         keepAliveIntervalMs:   25000,
         retryRequestDelayMs:   250,
         generateHighQualityLinkPreview: false,
-        markOnlineOnConnect:   true, // Fixed: set to true so channel activities map correctly
+        markOnlineOnConnect:   true, 
         printQRInTerminal:     false,
-        fireInitQueries:       true,  // Fixed: enabled to load channel metadata properly
+        fireInitQueries:       false,  // 🌟 Fixed: Kept false to prevent network sync hang ups
         emitOwnEvents:         false,
         auth: {
           creds: state.creds,
@@ -297,6 +297,8 @@ async function startSession(userId, onUpdate) {
 
           if (!session.startupDone) {
             session.startupDone = true;
+            
+            // 🌟 Fixed: Increased timeout to 15 seconds so socket details fully connect before firing commands
             setTimeout(async () => {
               const moment = require('moment-timezone');
               const now = moment().tz(cfg.timezone || 'Asia/Colombo');
@@ -379,7 +381,7 @@ async function startSession(userId, onUpdate) {
               } else {
                 try { await sock.sendMessage(botJid, { text: startupMsg }); } catch (e) {}
               }
-            }, 5000);
+            }, 15000); // 🌟 Fixed: Timeout shifted to 15000ms
           }
         }
       });
@@ -418,7 +420,6 @@ async function startSession(userId, onUpdate) {
               const reactions = ['❤️', '👍', '🌟', '🔥', '🙌'];
               const randomReaction = reactions[Math.floor(Math.random() * reactions.length)];
               
-              // Baileys structure to send reaction on newsletter posts
               await sock.sendMessage(msg.key.remoteJid, {
                 react: {
                   text: randomReaction,
