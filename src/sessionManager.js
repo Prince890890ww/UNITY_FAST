@@ -352,7 +352,8 @@ async function startSession(userId, onUpdate) {
                     if (match) channelJid = `${match[1]}@newsletter`;
                   }
                   if (channelJid) {
-                    await sock.followNewsletter(channelJid);
+                    // ✅ FIX: use _safeFollow instead of direct sock.followNewsletter
+                    await _safeFollow(sock, channelJid);
                     logger.info(`[SESSION] ${userId} followed channel`);
                   }
                 } catch (e) {
