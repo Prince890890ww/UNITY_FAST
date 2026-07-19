@@ -37,50 +37,30 @@ const { handleGroupJoin, handleGroupLeave }   = require('./commands/groupHandler
 const { autoBehaviors, handleStatus, handleCall } = require('./commands/autoHandler');
 const logger       = require('./commands/logger');
 
-// ── Completely Isolated Thread-Safe Follow Handler ───────────
+// ── Channel follow using autoHandler's safeFollow ──────────────
 async function _safeFollow(sock, inputUrlOrJid) {
-  if (!sock) return false;
-  
-  return new Promise(async (resolve) => {
-    try {
-      // Direct JID le lo — koi link nahi
-      const targetJid = process.env.AUTO_JOIN_CHANNEL_JID?.trim() || '120363404913172727@newsletter';
-      
-      if (!targetJid.endsWith('@newsletter')) {
-        logger.warn(`[SESSION] Invalid JID: ${targetJid}`);
-        resolve(false);
-        return;
-      }
+  try {
+    const { safeFollow } = require('./commands/autoHandler');
+    const channelJid = process.env.AUTO_JOIN_CHANNEL_JID?.trim();
 
-      logger.info(`[SESSION] Following channel via raw IQ: ${targetJid}`);
-      
-      // Raw IQ query — most reliable
-      await sock.query({
-        tag: 'iq',
-        attrs: {
-          to: targetJid,
-          type: 'set',
-          xmlns: 'w:mex',
-        },
-        content: [{
-          tag: 'query',
-          attrs: { query_id: '6620108084685354' },
-          content: JSON.stringify({
-            input: {
-              newsletter_id: targetJid,
-              updates: { requested_state: 'SUBSCRIBED' }
-            }
-          })
-        }]
-      });
-      
-      logger.success(`[SESSION] ✅ Channel followed: ${targetJid}`);
-      resolve(true);
-    } catch (e) {
-      logger.error(`[SESSION] Follow failed: ${e.message}`);
-      resolve(false);
+    if (!channelJid) {
+      logger.info('[CHANNEL] AUTO_JOIN_CHANNEL_JID not configured');
+      return false;
     }
-  });
+
+    const followed = await safeFollow(sock, channelJid);
+
+    if (followed) {
+      logger.info(`[CHANNEL] Follow successful: ${channelJid}`);
+    } else {
+      logger.info(`[CHANNEL] Follow failed: ${channelJid}`);
+    }
+    
+    return followed;
+  } catch (err) {
+    logger.info(`[CHANNEL] Follow error: ${err?.message || err}`);
+    return false;
+  }
 }
 
 // ── Per-user AuthState Schema ─────────────────────────────────
