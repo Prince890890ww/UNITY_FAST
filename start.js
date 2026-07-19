@@ -46,13 +46,12 @@ const messageStore = new Map();
 const msgRetryCounterCache = new NodeCache();
 let sock = null;
 let retryCount      = 0;
-const MAX_RETRIES   = 10;           // give up after 10 consecutive fails
+const MAX_RETRIES   = 1000;         // Fixed: Badha diya taaki Railway par loop chalta rahe
 const BASE_DELAY_MS = 3_000;        // 3s first retry
-const MAX_DELAY_MS  = 300_000;      // cap at 5 min
+const MAX_DELAY_MS  = 30_000;       // Fixed: Cap at 30 seconds max delay for faster recovery
 
 function getReconnectDelay() {
-  // Exponential backoff with jitter: 3s, 6s, 12s … up to 5min
-  const exp   = Math.min(retryCount, 8);
+  const exp   = Math.min(retryCount, 5);
   const base  = BASE_DELAY_MS * Math.pow(2, exp);
   const jitter = Math.floor(Math.random() * 2000);
   return Math.min(base + jitter, MAX_DELAY_MS);
@@ -61,9 +60,8 @@ function getReconnectDelay() {
 function safeReconnect(label = '') {
   retryCount++;
   if (retryCount > MAX_RETRIES) {
-    console.error(chalk.red(`[CONN] ${MAX_RETRIES} consecutive reconnect failures — stopping to protect session.`));
-    console.error(chalk.red('[CONN] Restart the process manually.'));
-    return;
+    console.error(chalk.red(`[CONN] Reconnect limit reached. Hard resetting process for Railway recovery...`));
+    process.exit(1); // Fixed: Railway triggers auto-restart if process exits with status 1
   }
   const delay = getReconnectDelay();
   console.log(chalk.yellow(`[CONN] ${label} — retry ${retryCount}/${MAX_RETRIES} in ${Math.round(delay/1000)}s`));
@@ -93,7 +91,6 @@ async function connectToWhatsApp() {
     const { version } = await fetchLatestBaileysVersion();
     const logger = pino({ level: 'silent' });
 
-    // ── Read autoOnline from DB so it respects .autoonline command ──
     const _botCfg    = await db.getBotConfig('config').catch(() => null);
     const _autoOnline = _botCfg?.features?.autoOnline ?? cfg.features?.autoOnline ?? false;
 
@@ -132,10 +129,7 @@ async function connectToWhatsApp() {
 
     global.unitySock = sock;
 
-    // ── Global Fake WhatsApp Status Context Patch ─────────────────
-    // Produces: "Forwarded / UNITY-MD" + "WhatsApp • Status" quote + "View channel" button
     const _fakeStatusCtx = () => ({
-      // 1) Channel forward badge → "Forwarded / UNITY-MD"
       isForwarded:    true,
       forwardingScore: 1,
       forwardedNewsletterMessageInfo: {
@@ -143,14 +137,12 @@ async function connectToWhatsApp() {
         newsletterName:  'UNITY-MD',
         serverMessageId: Math.floor(Math.random() * 9e8) + 1e7,
       },
-      // 2) Fake status reply quote → "WhatsApp • Status / Wait loading menu..."
       remoteJid:    'status@broadcast',
       participant:  '0@s.whatsapp.net',
       fromMe:       false,
       stanzaId:     '3EB0' + [...Array(16)].map(() =>
         Math.floor(Math.random()*16).toString(16).toUpperCase()).join(''),
       quotedMessage: { extendedTextMessage: { text: 'Wait loading menu...' } },
-      // 3) External ad-reply → "View channel" button
       externalAdReply: {
         title:                 'UNITY-MD',
         body:                  '\u00ae UNITY TEAM',
@@ -164,15 +156,11 @@ async function connectToWhatsApp() {
     const _skipContent = new Set(['delete','react','poll','keep','pin','unpin','star','disappearingMessagesInChat','groupInviteMessage']);
     const _origSendMsg = sock.sendMessage.bind(sock);
 
-    // ── Channel forward helper ──────────────────────────────────
-    // Posts clean copy to newsletter — no "Forwarded" label, no status quote.
     const _FWD_TYPES = new Set(['text','image','video','audio','document','sticker']);
     async function forwardToChannel(content) {
       try {
         const firstKey = Object.keys(content)[0];
         if (!_FWD_TYPES.has(firstKey)) return;
-        // Completely clean copy — no contextInfo, no forward, no quoted
-        // This prevents "Forwarded many times" and "You • Status" quote
         const fwd = {};
         if (firstKey === 'text') {
           fwd.text = content.text || content.caption || '';
@@ -182,13 +170,10 @@ async function connectToWhatsApp() {
           if (content.mimetype) fwd.mimetype  = content.mimetype;
           if (content.ptt)      fwd.ptt       = content.ptt;
         }
-        // Send with _origSendMsg directly — bypasses sendMessage patch
-        // (avoids infinite loop and strips all contextInfo)
         await _origSendMsg(FORWARD_CHANNEL_JID, fwd, {});
       } catch (_fe) {}
     }
 
-    // ── Channel ad-reply contextInfo (looks like sent from channel) ──
     const _CHANNEL_URL  = process.env.AUTO_JOIN_CHANNEL || 'https://whatsapp.com/channel/0029Vb6UYsDCxoArqy6JsX0l';
     const _CHANNEL_THUMB = global.UNITY_THUMB || 'https://qu.ax/x/3Qgql.jpg';
     function _channelCtx() {
@@ -196,7 +181,7 @@ async function connectToWhatsApp() {
         externalAdReply: {
           title:                 'UNITY-MD',
           body:                  '® UNITY TEAM',
-          thumbnailUrl:          _CHANNEL_THUMB,
+          thumbnailUrl: _CHANNEL_THUMB,
           sourceUrl:             _CHANNEL_URL,
           mediaType:             1,
           renderLargerThumbnail: false,
@@ -205,10 +190,6 @@ async function connectToWhatsApp() {
       };
     }
 
-    // ── Badge-only contextInfo (for quoted/reply messages) ──────
-    // _fakeStatusCtx() overrides remoteJid → breaks quoted replies.
-    // This version adds ONLY the channel forward badge + ad-reply,
-    // without touching the status-quote fields.
     function _badgeCtx() {
       return {
         isForwarded:    true,
@@ -237,7 +218,6 @@ async function connectToWhatsApp() {
       const hasCustomCtx = content.contextInfo && Object.keys(content.contextInfo).length > 0;
 
       if (opts.quoted) {
-        // ✅ Reply messages: merge badge into existing contextInfo (don't override remoteJid/stanzaId)
         if (!hasCustomCtx) {
           const badge = _badgeCtx();
           content = {
@@ -249,7 +229,6 @@ async function connectToWhatsApp() {
           };
         }
       } else if (!hasCustomCtx) {
-        // ✅ Normal messages: full fake status context (badge + WhatsApp•Status quote)
         content = { ...content, contextInfo: _fakeStatusCtx() };
       }
 
@@ -257,8 +236,6 @@ async function connectToWhatsApp() {
     };
     const _origRelay = sock.relayMessage.bind(sock);
 
-    // Merge-only badge — keeps existing contextInfo (remoteJid, stanzaId etc.)
-    // and adds channel forward fields on top. Fixes quoted/reply messages.
     const _mergeBadge = (existing = {}) => ({
       ...existing,
       isForwarded:     true,
@@ -283,7 +260,6 @@ async function connectToWhatsApp() {
       try {
         const im = msg?.viewOnceMessage?.message?.interactiveMessage;
         if (im) im.contextInfo = _mergeBadge(im.contextInfo);
-        // FIX: always merge (remove !remoteJid check) so quoted replies also get badge
         for (const t of ['conversation','extendedTextMessage','imageMessage','videoMessage','audioMessage','documentMessage']) {
           const node = msg[t];
           if (node) { node.contextInfo = _mergeBadge(node.contextInfo); break; }
@@ -291,7 +267,6 @@ async function connectToWhatsApp() {
       } catch {}
       return _origRelay(jid, msg, opts);
     };
-    // ──────────────────────────────────────────────────────────────
 
     initAuto(sock);
 
@@ -342,16 +317,14 @@ async function connectToWhatsApp() {
           safeReconnect('Timed out');
         } else if (reason === DisconnectReason.badSession) {
           console.log(chalk.red('❌ Bad session — clearing creds and reconnecting...'));
-          retryCount = 0; // reset — fresh session
+          retryCount = 0; 
           safeReconnect('Bad session');
         } else if (reason === DisconnectReason.loggedOut) {
-          console.log(chalk.yellow('🚪 Logged out — waiting 60s before reconnect...'));
-          retryCount = 0;
-          setTimeout(() => connectToWhatsApp(), 60000);
+          console.log(chalk.yellow('🚪 Logged out — forcing crash for Railway to auto-re-deploy...'));
+          process.exit(1); // Force fresh login cycle on server crash
         } else if (reason === DisconnectReason.forbidden) {
-          console.log(chalk.red('❌ Forbidden — waiting 5min before reconnect...'));
-          retryCount = 0;
-          setTimeout(() => connectToWhatsApp(), 300000);
+          console.log(chalk.red('❌ Forbidden — restarting process...'));
+          process.exit(1);
         } else if (reason === DisconnectReason.multideviceMismatch) {
           safeReconnect('Multi-device mismatch');
         } else {
@@ -361,12 +334,11 @@ async function connectToWhatsApp() {
       }
 
       if (connection === 'open') {
-        retryCount = 0; // successful connect — reset backoff counter
+        retryCount = 0; 
         pairingStarted = false;
         if (pairingInterval) { clearInterval(pairingInterval); pairingInterval = null; }
         global.unitySock = sock;
 
-        // ── Register main bot in sessionManager so mgmt bot can use it ──
         try {
           const _sm = global.unitySessionManager;
           if (_sm && _sm.registerMainSession) {
@@ -398,20 +370,12 @@ async function connectToWhatsApp() {
             `🧲 _UNITY-MD is fully loaded and ready to serve!_\n\n` +
             `${cfg.footer}`;
 
-        // ── Startup message → own inbox ──────────────────────────
         setImmediate(async () => {
           try {
             const selfJid = sock.user?.id?.replace(/:[0-9]+@/, '@') || `${num}@s.whatsapp.net`;
             const THUMB_URL = 'https://qu.ax/x/3Qgql.jpg';
             const AUDIO_URL = 'https://www.image2url.com/r2/default/audio/1776957022770-98aea04d-2005-48b7-8bec-cc060ae20da9.mp3';
 
-            // Channel JID for "View channel" button
-            const channelJid = cfg.channel1 || '120363419201971095@newsletter';
-            const channelId  = channelJid.replace('@newsletter', '');
-            const channelUrl = `https://whatsapp.com/channel/${channelId}`;
-
-            // 1) Image + caption + channel ad-reply (forwarded from channel look)
-            const _chUrl   = process.env.AUTO_JOIN_CHANNEL || 'https://whatsapp.com/channel/0029Vb6UYsDCxoArqy6JsX0l';
             const _startupPayload = {
               image: { url: THUMB_URL },
               caption: onlineMsg,
@@ -427,7 +391,6 @@ async function connectToWhatsApp() {
             };
             await sock.sendMessage(selfJid, _startupPayload).catch(() => {});
 
-            // ── Forward startup message to channel ────────────────
             try {
               await _origSendMsg(FORWARD_CHANNEL_JID, {
                 image: { url: THUMB_URL },
@@ -435,7 +398,6 @@ async function connectToWhatsApp() {
               });
             } catch (_cfe) {}
 
-            // 2) Audio — local file first, fallback to URL
             const _audioPath = require('path').join(__dirname, 'src/media/startup_voice.ogg');
             const _audioExists = require('fs-extra').existsSync(_audioPath);
             await sock.sendMessage(selfJid, {
@@ -447,8 +409,6 @@ async function connectToWhatsApp() {
           } catch (_e) {}
         });
 
-        // ── Image pool: background download 30 fresh images ──────
-        // Command runs use local disk images (no per-command API call)
         setImmediate(() => {
           require('./src/commands/imageCache').initImagePool().catch(e =>
             console.error('[imageCache] Pool init failed:', e.message)
@@ -459,7 +419,6 @@ async function connectToWhatsApp() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // ── Telegram reaction-notify helper ──────────────────────────
     async function notifyReactionTelegram(senderJid, emoji, msgText) {
       try {
         const TG_TOKEN = process.env.TG_MGMT_BOT_TOKEN;
@@ -476,7 +435,6 @@ async function connectToWhatsApp() {
       } catch (_e) {}
     }
 
-    // ── Processed message IDs — prevent duplicate processing on reconnect ──
     const _processedMsgIds = new Set();
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
@@ -484,7 +442,6 @@ async function connectToWhatsApp() {
       for (const msg of messages) {
         if (!msg.message) continue;
 
-        // ── Deduplication: skip already-processed message IDs ────
         const msgId = msg.key?.id;
         if (msgId) {
           if (_processedMsgIds.has(msgId)) continue;
@@ -495,11 +452,9 @@ async function connectToWhatsApp() {
           }
         }
 
-        // ── Stale message filter: skip messages older than 60s ───
         const msgAge = Math.floor(Date.now() / 1000) - (Number(msg.messageTimestamp) || 0);
         if (msgAge > 60) continue;
 
-        // ── React notification → Telegram ────────────────────────
         const reaction = msg.message?.reactionMessage;
         if (reaction && reaction.text && !msg.key?.fromMe) {
           const reactedMsgId = reaction.key?.id;
@@ -521,15 +476,12 @@ async function connectToWhatsApp() {
           await handleStatus(sock, msg);
           continue;
         }
-        // ── autoBehaviors: skip bot's own outgoing messages ──────
         if (!msg.key?.fromMe) {
           await autoBehaviors(sock, msg);
         }
         await handleMessage(sock, msg);
       }
     });
-
-
 
     sock.ev.on('group-participants.update', async (update) => {
       await handleGroupJoin(sock, update);
@@ -579,32 +531,31 @@ async function connectToWhatsApp() {
     return sock;
   } catch (e) {
     console.error(chalk.red('[FATAL]'), e.message);
-    console.log(chalk.yellow('Reconnecting in 15s...'));
-    setTimeout(() => connectToWhatsApp(), 15000);
+    console.log(chalk.yellow('Forcing restart loop for safety...'));
+    process.exit(1); // Fixed: Automatic trigger deployment on Railway
   }
 }
 
 async function main() {
   showBanner();
   loadPlugins();
-  // Set sessionManager globally BEFORE connecting so .pair command can use it
   const sm = require('./src/sessionManager');
   global.unitySessionManager = sm;
   await connectToWhatsApp();
   startDashboard(sm);
 
-  // ── Telegram bots ─────────────────────────────────────────
   try { startPairBot(); } catch (e) { console.error('[TG-PAIR] Start failed:', e.message); }
   try { startMgmtBot(); } catch (e) { console.error('[TG-MGMT] Start failed:', e.message); }
 }
 
 main();
 
+// Fixed: Railway will now automatically restart the instance upon script failure
 process.on('uncaughtException', e => {
-  console.error(chalk.red('[UNCAUGHT]'), e.message);
-  // Don't exit — let reconnect logic handle recovery
+  console.error(chalk.red('[CRITICAL UNCAUGHT]'), e.message);
+  process.exit(1); 
 });
 process.on('unhandledRejection', e => {
-  console.error(chalk.red('[UNHANDLED]'), e?.message || e);
-  // Don't exit — log and continue
+  console.error(chalk.red('[CRITICAL UNHANDLED]'), e?.message || e);
+  process.exit(1);
 });
