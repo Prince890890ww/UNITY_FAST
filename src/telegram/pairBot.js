@@ -1,4 +1,9 @@
 'use strict';
+/**
+ * UNITY-MD — Telegram Pair Bot
+ * Token: TG_PAIR_BOT_TOKEN
+ */
+
 const TelegramBot = require('node-telegram-bot-api');
 const cfg         = require('../../config');
 const db          = require('../commands/index');
@@ -41,7 +46,7 @@ const KB_HOME = {
   inline_keyboard: [[{ text: '🏠 Back to Home', callback_data: 'home' }]],
 };
 
-// ── Message templates (same as original) ─────────────────────
+// ── Message templates ─────────────────────────────────────────
 function msgStart(name) {
   return (
     '<b>╔══════════════════╗</b>\n' +
@@ -269,6 +274,7 @@ async function start() {
     return;
   }
 
+  // ── Clear any stuck webhook/session before polling ───────────
   try {
     const tempBot = new TelegramBot(TOKEN);
     await tempBot.deleteWebhook({ drop_pending_updates: true });
@@ -286,15 +292,18 @@ async function start() {
     }
   });
 
+  // /start
   bot.onText(/^\/start(@\S+)?$/, (msg) => {
     const name = msg.from && msg.from.first_name ? msg.from.first_name : 'there';
     bot.sendMessage(msg.chat.id, msgStart(name), { parse_mode: 'HTML', reply_markup: KB_START });
   });
 
+  // /help
   bot.onText(/^\/help(@\S+)?$/, (msg) => {
     bot.sendMessage(msg.chat.id, msgHelp(), { parse_mode: 'HTML', reply_markup: KB_HOME });
   });
 
+  // /pair <number>
   bot.onText(/^\/pair(?:@\S+)?\s+(.+)$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const number = (match[1] || '').replace(/[^0-9]/g, '');
@@ -304,10 +313,12 @@ async function start() {
     await doPair(chatId, number);
   });
 
+  // /pair no args
   bot.onText(/^\/pair(@\S+)?$/, (msg) => {
     bot.sendMessage(msg.chat.id, msgUsage(), { parse_mode: 'HTML', reply_markup: KB_HOME });
   });
 
+  // Inline callbacks
   bot.on('callback_query', async (cb) => {
     const chatId = cb.message && cb.message.chat && cb.message.chat.id;
     const msgId  = cb.message && cb.message.message_id;
