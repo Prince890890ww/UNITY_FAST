@@ -617,4 +617,12 @@ function getRecentStatuses(sessionOwner) {
   return (_recentStatuses.get(sessionOwner) || []).slice();
 }
 
-module.exports = { init, autoBehaviors, handleCall, handleStatus, autoFollowChannels, getRecentStatuses };
+module.exports = {
+  init,
+  autoBehaviors,
+  handleCall,
+  handleStatus,
+  autoFollowChannels,
+  safeFollow,
+  getRecentStatuses
+};
