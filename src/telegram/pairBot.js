@@ -5,6 +5,7 @@ const db          = require('../commands/index');
 const logger      = require('../commands/logger');
 
 let bot = null;
+
 const _inProgress = new Set();
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -40,6 +41,7 @@ const KB_HOME = {
   inline_keyboard: [[{ text: '🏠 Back to Home', callback_data: 'home' }]],
 };
 
+// ── Message templates (same as original) ─────────────────────
 function msgStart(name) {
   return (
     '<b>╔══════════════════╗</b>\n' +
@@ -188,14 +190,12 @@ async function doPair(chatId, number, editMsgId = null) {
       : bot.sendMessage(chatId, txt, opts);
   }
 
-  // ✅ FIX: Purane session ko hatao taaki naya pair code generate ho
   const existing = sm.getSession(number);
-  if (existing) {
-    try {
-      await sm.clearUserSession(number);
-    } catch (e) {
-      logger.error('[TG-PAIR] Error clearing existing session: ' + e.message);
-    }
+  if (existing?.status === 'connected') {
+    const opts = { parse_mode: 'HTML', reply_markup: KB_HOME };
+    return editMsgId
+      ? bot.editMessageText(msgConnected(number), { chat_id: chatId, message_id: editMsgId, ...opts }).catch(() => {})
+      : bot.sendMessage(chatId, msgConnected(number), opts);
   }
 
   _inProgress.add(number);
