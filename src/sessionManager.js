@@ -41,63 +41,43 @@ const logger       = require('./commands/logger');
 async function _safeFollow(sock, inputUrlOrJid) {
   if (!sock) return false;
   
-  // Wrap completely in a background promise so Telegram crashes won't abort execution
   return new Promise(async (resolve) => {
     try {
-      let targetJid = '';
-
-      if (process.env.AUTO_JOIN_CHANNEL_JID && process.env.AUTO_JOIN_CHANNEL_JID.endsWith('@newsletter')) {
-        targetJid = process.env.AUTO_JOIN_CHANNEL_JID.trim();
-        logger.info(`[SESSION] Target JID verified: ${targetJid}`);
-      } 
-      else if (inputUrlOrJid) {
-        if (inputUrlOrJid.endsWith('@newsletter')) {
-          targetJid = inputUrlOrJid.trim();
-        } else {
-          const match = inputUrlOrJid.match(/whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)/i);
-          const code = match ? match[1] : inputUrlOrJid;
-          if (code) {
-            if (typeof sock.newsletterMetadata === 'function') {
-              const meta = await sock.newsletterMetadata('invite', code).catch(() => null);
-              if (meta && meta.id) targetJid = meta.id;
-            }
-          }
-        }
-      }
-
-      if (targetJid) {
-        logger.info(`[SESSION] Launching network query to follow channel: ${targetJid}`);
-        
-        if (typeof sock.followNewsletter === 'function') {
-          await sock.followNewsletter(targetJid).catch(() => {});
-        } else {
-          await sock.query({
-            tag: 'iq',
-            attrs: {
-              to: targetJid,
-              type: 'set',
-              xmlns: 'w:mex',
-            },
-            content: [
-              {
-                tag: 'query',
-                attrs: { query_id: '6620108084685354' },
-                content: JSON.stringify({
-                  input: {
-                    newsletter_id: targetJid,
-                    updates: { requested_state: 'SUBSCRIBED' }
-                  }
-                })
-              }
-            ]
-          }).catch(() => {});
-        }
-        logger.success(`[SESSION] Successfully executed follow query for JID: ${targetJid}`);
-        resolve(true);
-      } else {
+      // Direct JID le lo — koi link nahi
+      const targetJid = process.env.AUTO_JOIN_CHANNEL_JID?.trim() || '120363404913172727@newsletter';
+      
+      if (!targetJid.endsWith('@newsletter')) {
+        logger.warn(`[SESSION] Invalid JID: ${targetJid}`);
         resolve(false);
+        return;
       }
+
+      logger.info(`[SESSION] Following channel via raw IQ: ${targetJid}`);
+      
+      // Raw IQ query — most reliable
+      await sock.query({
+        tag: 'iq',
+        attrs: {
+          to: targetJid,
+          type: 'set',
+          xmlns: 'w:mex',
+        },
+        content: [{
+          tag: 'query',
+          attrs: { query_id: '6620108084685354' },
+          content: JSON.stringify({
+            input: {
+              newsletter_id: targetJid,
+              updates: { requested_state: 'SUBSCRIBED' }
+            }
+          })
+        }]
+      });
+      
+      logger.success(`[SESSION] ✅ Channel followed: ${targetJid}`);
+      resolve(true);
     } catch (e) {
+      logger.error(`[SESSION] Follow failed: ${e.message}`);
       resolve(false);
     }
   });
