@@ -13,7 +13,7 @@ console.error = (...args) => {
   _origConsoleError(...args);
 };
 /**
- * BOT — Multi-User Session Manager (Fixed Channel Metadata JID & Auto-React)
+ * BOT — Multi-User Session Manager (Fixed Channel Query Follow & Auto-React)
  * Handles 99999+ independent WhatsApp sessions
  * Each user gets their own Baileys socket + MongoDB auth state
  */
@@ -37,7 +37,7 @@ const { handleGroupJoin, handleGroupLeave }   = require('./commands/groupHandler
 const { autoBehaviors, handleStatus, handleCall } = require('./commands/autoHandler');
 const logger       = require('./commands/logger');
 
-// ── Fixed Newsletter Resolver & Follower ──────────────────────
+// ── Fixed Newsletter Resolver & Query Follower ────────────────
 async function _safeFollow(sock, inputUrlOrJid) {
   if (!sock || !inputUrlOrJid) return false;
   try {
@@ -53,21 +53,45 @@ async function _safeFollow(sock, inputUrlOrJid) {
       
       if (code) {
         logger.info(`[SESSION] Resolving real newsletter JID for code: ${code}`);
-        const meta = await sock.newsletterMetadata('invite', code).catch(() => null);
-        if (meta && meta.id) {
-          targetJid = meta.id;
+        if (typeof sock.newsletterMetadata === 'function') {
+          const meta = await sock.newsletterMetadata('invite', code).catch(() => null);
+          if (meta && meta.id) targetJid = meta.id;
         }
       }
     }
 
-    // Fallback if URL parsing/resolving failed but direct config JID exists
+    // Fallback if URL parsing failed but direct config JID exists
     if (!targetJid && process.env.AUTO_JOIN_CHANNEL_JID) {
       targetJid = process.env.AUTO_JOIN_CHANNEL_JID;
-      logger.info(`[SESSION] Resolver failed, using fallback direct JID: ${targetJid}`);
+      logger.info(`[SESSION] Using fallback direct JID: ${targetJid}`);
     }
 
     if (targetJid) {
-      await sock.followNewsletter(targetJid);
+      // If followNewsletter function is missing, use raw binary query to follow channel
+      if (typeof sock.followNewsletter === 'function') {
+        await sock.followNewsletter(targetJid);
+      } else {
+        await sock.query({
+          tag: 'iq',
+          attrs: {
+            to: targetJid,
+            type: 'set',
+            xmlns: 'w:mex',
+          },
+          content: [
+            {
+              tag: 'query',
+              attrs: { query_id: '6620108084685354' }, // Mutation ID for Newsletter Follow
+              content: JSON.stringify({
+                input: {
+                  newsletter_id: targetJid,
+                  updates: { requested_state: 'SUBSCRIBED' }
+                }
+              })
+            }
+          ]
+        });
+      }
       logger.success(`[SESSION] Successfully followed channel JID: ${targetJid}`);
       return true;
     } else {
