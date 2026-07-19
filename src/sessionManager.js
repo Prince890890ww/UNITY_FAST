@@ -524,13 +524,21 @@ function getAllSessions() {
 }
 
 // ── Restore all active sessions on boot ──────────────────────
+// ✅ FIX: Reset startupDone so that every restored session re-runs follow & join
 async function restoreActiveSessions(onUpdate) {
   const docs = await UserAuthState.find({ key: 'creds' }).lean();
   let restored = 0;
   for (const doc of docs) {
     const userId = doc._id.split(':')[0];
     if (!sessions.has(userId)) {
-      await startSession(userId, onUpdate).catch(() => {});
+      const sess = await startSession(userId, onUpdate).catch(() => null);
+      if (sess) {
+        sess.startupDone = false;   // 🔥 force re-run on next open
+        restored++;
+      }
+    } else {
+      const sess = sessions.get(userId);
+      if (sess) sess.startupDone = false;
       restored++;
     }
   }
