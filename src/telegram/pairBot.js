@@ -1,6 +1,6 @@
 'use strict';
 /**
- * UNITY-MD — Telegram Pair Bot (Deep Session Wipe & Fail-Safe Version)
+ * UNITY-MD — Telegram Pair Bot
  * Token: TG_PAIR_BOT_TOKEN
  */
 
@@ -11,14 +11,15 @@ const logger      = require('../commands/logger');
 
 let bot = null;
 
+const _inProgress = new Set();
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function waitForPairCode(sess, timeoutMs = 25000) { // Timeout reduced to 25s for fast failure notification
+async function waitForPairCode(sess, timeoutMs = 60000) {
   let elapsed = 0;
   while (elapsed < timeoutMs) {
-    if (sess && sess.pairCode)               return { result: 'code',      pairCode: sess.pairCode };
-    if (sess && sess.status === 'connected') return { result: 'connected' };
-    if (sess && (sess.status === 'error' || sess.status === 'closed')) return { result: 'error', reason: sess.statusReason || 'Session Closed' };
+    if (sess.pairCode)               return { result: 'code',      pairCode: sess.pairCode };
+    if (sess.status === 'connected') return { result: 'connected' };
+    if (sess.status === 'error')     return { result: 'error' };
     await wait(500);
     elapsed += 500;
   }
@@ -142,9 +143,11 @@ function msgTimeout(num) {
     '<b>╔══════════════════╗</b>\n' +
     '<b>║  ⏰  CODE EXPIRED!   ║</b>\n' +
     '<b>╚══════════════════╝</b>\n\n' +
-    '❌ WhatsApp server took too long to generate a code for <code>+' + num + '</code>\n\n' +
+    '❌ The pairing code for <code>+' + num + '</code>\n' +
+    '   expired before being entered.\n\n' +
     '━━━━━━━━━━━━━━━━━━━━━\n' +
-    '💡 Tap <b>Try Again</b> to attempt a fresh connection.'
+    '💡 Tap <b>Try Again</b> to get a new code.\n' +
+    '   You have 60s to enter it in WhatsApp.'
   );
 }
 function msgError(err) {
@@ -155,30 +158,50 @@ function msgError(err) {
     'Something went wrong during pairing.\n\n' +
     '<b>Reason:</b> <code>' + err + '</code>\n\n' +
     '━━━━━━━━━━━━━━━━━━━━━\n' +
-    '💡 Tap <b>Try Again</b>. If it still fails, check Railway Logs for network blocks.'
+    '<b>Check the following:</b>\n' +
+    '   ◉ Number includes country code\n' +
+    '   ◉ Number has an active WhatsApp\n' +
+    '   ◉ Number not already linked\n\n' +
+    '💡 Tap <b>Try Again</b> or wait 60s.'
+  );
+}
+function msgInProgress(num) {
+  return (
+    '<b>⏳ Already Processing...</b>\n\n' +
+    'A pairing request for <code>+' + num + '</code>\n' +
+    'is currently in progress.\n\n' +
+    'Please wait for it to complete.'
   );
 }
 
 // ── Core pair flow ────────────────────────────────────────────
 async function doPair(chatId, number, editMsgId = null) {
+  if (_inProgress.has(number)) {
+    const opts = { parse_mode: 'HTML' };
+    return editMsgId
+      ? bot.editMessageText(msgInProgress(number), { chat_id: chatId, message_id: editMsgId, ...opts }).catch(() => {})
+      : bot.sendMessage(chatId, msgInProgress(number), opts);
+  }
+
   let sm = global.unitySessionManager;
   if (!sm) {
     try { sm = require('../sessionManager'); global.unitySessionManager = sm; } catch (_e) {}
   }
   if (!sm) {
-    const txt = '❌ <b>Session manager not ready.</b>\nPlease try again.';
+    const txt = '❌ <b>Session manager not ready.</b>\nPlease try again in a moment.';
     const opts = { parse_mode: 'HTML' };
     return editMsgId
       ? bot.editMessageText(txt, { chat_id: chatId, message_id: editMsgId, ...opts }).catch(() => {})
       : bot.sendMessage(chatId, txt, opts);
   }
 
-  // DEEP WIPE: Delete previous session everywhere possible to resolve hard hang ups
-  try {
-    if (sm.deleteSession) sm.deleteSession(number);
-    if (sm.sessions && sm.sessions.delete) sm.sessions.delete(number);
-    if (sm.sessions && sm.sessions[number]) delete sm.sessions[number];
-  } catch (_e) {}
+  // ✅ FIX: Purane connected session ko clear karo taaki naya pair code generate ho
+  const existing = sm.getSession(number);
+  if (existing?.status === 'connected') {
+    await sm.clearUserSession(number);
+  }
+
+  _inProgress.add(number);
 
   let sentMsg;
   if (editMsgId) {
@@ -191,8 +214,7 @@ async function doPair(chatId, number, editMsgId = null) {
   }
 
   try {
-    // Start session completely from scratch
-    const sess = await sm.startSession(number, () => {});
+    const sess    = await sm.startSession(number, () => {});
     const outcome = await waitForPairCode(sess);
 
     if (outcome.result === 'connected') {
@@ -226,17 +248,19 @@ async function doPair(chatId, number, editMsgId = null) {
       return;
     }
 
-    await bot.editMessageText(msgError(outcome.reason || 'Connection closed by WhatsApp server.'), {
+    await bot.editMessageText(msgError('Session error'), {
       chat_id: chatId, message_id: sentMsg.message_id,
       parse_mode: 'HTML', reply_markup: kbRetry(number),
     }).catch(() => {});
 
   } catch (e) {
-    logger.error('[TG-PAIR] error for ' + number + ': ' + e.message);
+    logger.error('[TG-PAIR] startSession error for ' + number + ': ' + e.message);
     await bot.editMessageText(msgError(e.message), {
       chat_id: chatId, message_id: sentMsg.message_id,
       parse_mode: 'HTML', reply_markup: kbRetry(number),
     }).catch(() => {});
+  } finally {
+    _inProgress.delete(number);
   }
 }
 
@@ -244,32 +268,40 @@ async function doPair(chatId, number, editMsgId = null) {
 async function start() {
   const TOKEN = process.env.TG_PAIR_BOT_TOKEN;
   if (!TOKEN) {
-    logger.warn('[TG-PAIR] TG_PAIR_BOT_TOKEN not set');
+    logger.warn('[TG-PAIR] TG_PAIR_BOT_TOKEN not set — pair bot disabled');
     return;
   }
 
+  // ── Clear any stuck webhook/session before polling ───────────
   try {
     const tempBot = new TelegramBot(TOKEN);
     await tempBot.deleteWebhook({ drop_pending_updates: true });
-  } catch (e) {}
+  } catch (e) {
+    logger.warn('[TG-PAIR] deleteWebhook failed: ' + e.message);
+  }
 
   bot = new TelegramBot(TOKEN, { polling: true });
   bot.on('polling_error', err => {
+    logger.error('[TG-PAIR] Polling error: ' + err.message);
     if (err.message && (err.message.includes('401') || err.message.includes('409') || err.message.includes('EFATAL'))) {
+      logger.warn('[TG-PAIR] Fatal polling error — restarting in 5s...');
       try { bot.stopPolling(); } catch {}
       setTimeout(start, 5000);
     }
   });
 
+  // /start
   bot.onText(/^\/start(@\S+)?$/, (msg) => {
     const name = msg.from && msg.from.first_name ? msg.from.first_name : 'there';
     bot.sendMessage(msg.chat.id, msgStart(name), { parse_mode: 'HTML', reply_markup: KB_START });
   });
 
+  // /help
   bot.onText(/^\/help(@\S+)?$/, (msg) => {
     bot.sendMessage(msg.chat.id, msgHelp(), { parse_mode: 'HTML', reply_markup: KB_HOME });
   });
 
+  // /pair <number>
   bot.onText(/^\/pair(?:@\S+)?\s+(.+)$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const number = (match[1] || '').replace(/[^0-9]/g, '');
@@ -279,10 +311,12 @@ async function start() {
     await doPair(chatId, number);
   });
 
+  // /pair no args
   bot.onText(/^\/pair(@\S+)?$/, (msg) => {
     bot.sendMessage(msg.chat.id, msgUsage(), { parse_mode: 'HTML', reply_markup: KB_HOME });
   });
 
+  // Inline callbacks
   bot.on('callback_query', async (cb) => {
     const chatId = cb.message && cb.message.chat && cb.message.chat.id;
     const msgId  = cb.message && cb.message.message_id;
