@@ -16,6 +16,10 @@
     {
       "source": "/socket.io/(.*)",
       "destination": "https://unityfast-production.up.railway.app/socket.io/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "https://unityfast-production.up.railway.app/$1"
     }
   ]
 }
