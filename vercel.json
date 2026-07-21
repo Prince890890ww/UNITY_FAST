@@ -5,22 +5,6 @@
       "destination": "https://unityfast-production.up.railway.app/pair"
     },
     {
-      "source": "/pair",
-      "destination": "https://unityfast-production.up.railway.app/pair"
-    },
-    {
-      "source": "/api/(.*)",
-      "destination": "https://unityfast-production.up.railway.app/api/$1"
-    },
-    {
-      "source": "/x",
-      "destination": "https://unityfast-production.up.railway.app/x"
-    },
-    {
-      "source": "/socket.io/(.*)",
-      "destination": "https://unityfast-production.up.railway.app/socket.io/$1"
-    },
-    {
       "source": "/(.*)",
       "destination": "https://unityfast-production.up.railway.app/$1"
     }
