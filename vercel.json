@@ -1,14 +1,16 @@
 {
-  "builds": [
+  "rewrites": [
     {
-      "src": "start.js",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
+      "source": "/api/(.*)",
+      "destination": "https://your-railway-app.up.railway.app/api/$1"
+    },
     {
-      "src": "/(.*)",
-      "dest": "start.js"
+      "source": "/x",
+      "destination": "https://your-railway-app.up.railway.app/x"
+    },
+    {
+      "source": "/socket.io/(.*)",
+      "destination": "https://your-railway-app.up.railway.app/socket.io/$1"
     }
   ]
 }
