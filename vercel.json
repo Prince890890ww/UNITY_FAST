@@ -1,21 +1,8 @@
 {
-  "outputDirectory": "dashboard/public",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "https://prince-md-ok-fire-production.up.railway.app/api/$1"
-    },
-    {
-      "source": "/x",
-      "destination": "https://prince-md-ok-fire-production.up.railway.app/x"
-    },
-    {
-      "source": "/socket.io/(.*)",
-      "destination": "https://prince-md-ok-fire-production.up.railway.app/socket.io/$1"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "https://prince-md-ok-fire-production.up.railway.app/$1"
+      "source": "/:path*",
+      "destination": "https://mdalone-production.up.railway.app/:path*"
     }
   ]
 }
