@@ -1,8 +1,8 @@
 {
   "rewrites": [
     {
-      "source": "/:path*",
-      "destination": "/api/:path*"
+      "source": "/(.*)",
+      "destination": "https://mdalone-production.up.railway.app/$1"
     }
   ]
 }
