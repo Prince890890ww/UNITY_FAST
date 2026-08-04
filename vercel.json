@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "https://mdalone-production.up.railway.app/$1"
+      "destination": "https://prince-wp-bot-production.up.railway.app/$1"
     }
   ]
 }
